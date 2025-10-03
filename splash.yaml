@@ -1,0 +1,18 @@
+flutter_native_splash:
+  android: true
+  ios: true
+  web: false
+
+  color: "#FFFFFF"
+  color_dark: "#272727"
+  image: assets/logos/Medi_Care-splash-logo-black.jpeg
+  image_dark: assets/logos/Medi_Care-splash-logo-white.jpeg
+
+  android_12:
+    color: "#FFFFFF"
+    color_dark: "#272727"
+    image: assets/logos/Medi_Care-splash-logo-black.jpeg
+    image_dark: assets/logos/Medi_Care-splash-logo-white.jpeg
+
+
+
