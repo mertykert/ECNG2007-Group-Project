@@ -267,7 +267,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                     style: const TextStyle(
                                       color: Color(0xFF2d59f0),
                                       fontWeight: FontWeight.w600,
-                                      decoration: TextDecoration.underline,
                                     ),
                                     recognizer: TapGestureRecognizer()..onTap = _openTermsPage,
                                   ),
@@ -277,7 +276,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 10),
 
 
                       // Sign Up Button

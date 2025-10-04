@@ -98,7 +98,7 @@ class WelcomeScreen extends StatelessWidget {
             left: 30,
             bottom: 40,
             child: _roundedButton(
-              text: "Sign In  ",
+              text: "Sign In ",
               color: Colors.white,
               textColor: Colors.black,
               iconColor: Colors.black,
@@ -107,6 +107,7 @@ class WelcomeScreen extends StatelessWidget {
               },
             ),
           ),
+
 
           // Sign Up Button
           Positioned(
