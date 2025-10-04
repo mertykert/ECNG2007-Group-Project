@@ -103,7 +103,7 @@ class WelcomeScreen extends StatelessWidget {
               textColor: Colors.black,
               iconColor: Colors.black,
               onTap: () {
-                // TODO: Navigate to Firebase sign-in screen
+                Navigator.pushNamed(context, "/signin");
               },
             ),
           ),
