@@ -50,11 +50,10 @@ flutter:
 
   #----------------- LOCAL ASSETS -------------------#
 
-assets:
-  - assets/logos/Medi_Care-splash-logo-black.jpeg
-  - assets/logos/Medi_Care-splash-logo-white.jpeg
-  - assets/icons/
-  - assets/images/
+  assets:
+    - assets/logos/
+    - assets/fonts/
+    - assets/images/
 
  #----------------- LOCAL FONTS ---------------------#
 fonts:

@@ -1,6 +1,7 @@
 import 'package:medi_care/utils/theme/theme.dart';
 import 'package:flutter/material.dart';
 
+
 // -- Use this Class to setup themes, initial Bindings, any animations and much
 class App extends StatelessWidget {
   const App({super.key});
