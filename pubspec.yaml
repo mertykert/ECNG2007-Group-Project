@@ -1,4 +1,4 @@
-name: Medi_Care
+name: medi_care
 description: A new Flutter project.
 
 publish_to: 'none'
@@ -51,7 +51,8 @@ flutter:
   #----------------- LOCAL ASSETS -------------------#
 
 assets:
-  - assets/logos/
+  - assets/logos/Medi_Care-splash-logo-black.jpeg
+  - assets/logos/Medi_Care-splash-logo-white.jpeg
   - assets/icons/
   - assets/images/
 

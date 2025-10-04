@@ -1,4 +1,4 @@
-import 'package:Medi_Care/utils/theme/theme.dart';
+import 'package:medi_care/utils/theme/theme.dart';
 import 'package:flutter/material.dart';
 
 // -- Use this Class to setup themes, initial Bindings, any animations and much

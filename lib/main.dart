@@ -1,18 +1,24 @@
-import 'package:Medi_Care/utils/constants/colors.dart';
-import 'package:Medi_Care/utils/theme/theme.dart';
+
 import 'package:flutter/material.dart';
+import 'package:medi_care/features/authentication/screens/login/login.dart';
 
-import 'app.dart';
-
-// ------- Entry point of Flutter App -------
-void main()
-{
-  // Todo: Add Widgets Binding
-  // Todo: Init Local Storage
-  // Todo: Await Native Splash
-  // Todo: Initialize Firebase
-  // Todo: Initialize Authentication
-
-  runApp(const App());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MyApp());
 }
 
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Medi Care',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: const LoginScreen(), // Directly show login after native splash
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
