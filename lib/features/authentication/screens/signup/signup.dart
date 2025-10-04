@@ -163,7 +163,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         validator: (value) =>
                         value == null || value.isEmpty ? "Enter your email" : null,
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 10),
 
                       // Password
                       TextFormField(
@@ -239,7 +239,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 10),
 
                       // Terms & Privacy
                       Row(
@@ -276,7 +276,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 20),
 
 
                       // Sign Up Button
