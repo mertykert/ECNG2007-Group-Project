@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'care_giver_1st.dart';
-import 'care_receiver_1st.dart';
-import 'edit_profile.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ProfileSelectionScreen extends StatefulWidget {
   const ProfileSelectionScreen({super.key});
@@ -10,177 +9,178 @@ class ProfileSelectionScreen extends StatefulWidget {
   State<ProfileSelectionScreen> createState() => _ProfileSelectionScreenState();
 }
 
-class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
-  // Profile names
-  String caregiverName = "Care Giver";
-  String careReceiverName = "Care Receiver";
+class _ProfileSelectionScreenState extends State<ProfileSelectionScreen>
+    with SingleTickerProviderStateMixin {
+  bool _isLoading = false;
+
+  Future<void> _setRole(String role) async {
+    setState(() => _isLoading = true);
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user != null) {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'role': role,
+      }, SetOptions(merge: true));
+    }
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    Navigator.pushReplacementNamed(context, '/HomeScreen');
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF6A11CB),
-              Color(0xFF2575FC),
+      backgroundColor: const Color(0xFFF7F9FC),
+      body: SafeArea(
+        child: Center(
+          child: Stack(
+            children: [
+              if (_isLoading)
+                const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF2D59F0)),
+                ),
+              if (!_isLoading)
+                SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 50),
+
+                        // 🌤️ Optional illustration (replace asset)
+                        Container(
+                          width: 160,
+                          height: 160,
+                          decoration: const BoxDecoration(
+                            image: DecorationImage(
+                              image: AssetImage("assets/images/medical_wave.png"),
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 20),
+                        const Text(
+                          "Select Your Profile",
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF2D59F0),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Choose your role to personalize your MediCare experience.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Colors.black54,
+                          ),
+                        ),
+
+                        const SizedBox(height: 40),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildProfileCard(
+                              icon: Icons.volunteer_activism_rounded,
+                              label: "Care Giver",
+                              description: "Manage and monitor medications.",
+                              color: const Color(0xFF2D59F0),
+                              onTap: () => _setRole('caregiver'),
+                            ),
+                            const SizedBox(width: 24),
+                            _buildProfileCard(
+                              icon: Icons.favorite_rounded,
+                              label: "Care Receiver",
+                              description: "Stay on top of your schedule.",
+                              color: const Color(0xFF00B0FF),
+                              onTap: () => _setRole('receiver'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 60),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Select Your Profile',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 50),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildProfileCard(
-                  context,
-                  label: caregiverName,
-                  color: Colors.blueAccent,
-                  icon: Icons.person,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const CaregiverScreen(),
-                      ),
-                    );
-                  },
-                  onEdit: () async {
-                    String? newName = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            EditProfileScreen(currentName: caregiverName),
-                      ),
-                    );
-                    if (newName != null && newName.isNotEmpty) {
-                      setState(() {
-                        caregiverName = newName;
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(width: 40),
-                _buildProfileCard(
-                  context,
-                  label: careReceiverName,
-                  color: Colors.cyanAccent,
-                  icon: Icons.person,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const CarereceiverScreen(),
-                      ),
-                    );
-                  },
-                  onEdit: () async {
-                    String? newName = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            EditProfileScreen(currentName: careReceiverName),
-                      ),
-                    );
-                    if (newName != null && newName.isNotEmpty) {
-                      setState(() {
-                        careReceiverName = newName;
-                      });
-                    }
-                  },
-                ),
-              ],
-            ),
-          ],
         ),
       ),
     );
   }
 
-  Widget _buildProfileCard(
-      BuildContext context, {
-        required String label,
-        required Color color,
-        required IconData icon,
-        required VoidCallback onTap,
-        required VoidCallback onEdit,
-      }) {
-    // Create a translucent background using Color.fromRGBO
-    Color translucentColor = Color.fromRGBO(
-      color.red,
-      color.green,
-      color.blue,
-      0.3, // 30% opacity
-    );
-
-    return Column(
-      children: [
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: 140,
-            height: 180,
-            decoration: BoxDecoration(
-              color: translucentColor, // translucent bubble
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5),
-                ),
-              ],
+  Widget _buildProfileCard({
+    required IconData icon,
+    required String label,
+    required String description,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        width: 150,
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
+          ],
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          splashColor: color.withOpacity(0.1),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                CircleAvatar(
-                  radius: 50,
-                  backgroundColor: color,
-                  child: Icon(icon, size: 50, color: Colors.white),
+                Container(
+                  width: 65,
+                  height: 65,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color.withOpacity(0.1),
+                  ),
+                  child: Icon(icon, color: color, size: 34),
                 ),
-                const SizedBox(height: 15),
+                const SizedBox(height: 16),
                 Text(
                   label,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  description,
+                  textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+                    fontSize: 12.5,
+                    color: Colors.black54,
+                    height: 1.3,
                   ),
                 ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 10),
-        ElevatedButton.icon(
-          onPressed: onEdit,
-          icon: const Icon(Icons.edit, size: 18),
-          label: const Text("Edit Profile"),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color.fromRGBO(255, 255, 255, 0.1), // translucent white
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

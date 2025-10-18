@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
+import 'package:medi_care/widgets/show_message.dart'; // import modern message helper
+import 'dart:math';
+
+import '../../../../widgets/back_button_overlay.dart';
 
 
 class SignUpScreen extends StatefulWidget {
@@ -22,33 +29,204 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _agree = false;
 
   void _openTermsPage() {
-    // For now, this does nothing — just placeholder
     debugPrint("Terms & Privacy tapped");
+  }
+
+  String _generatePartnerCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final random = Random.secure();
+    return List.generate(6, (index) => chars[random.nextInt(chars.length)]).join();
   }
 
   Future<void> _signUp() async {
     FocusScope.of(context).unfocus();
 
     if (_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Form is valid — proceed to sign up')),
-      );
-      // Continue your sign-up logic here
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill out all required fields')),
-      );
-    }
+      if (!_agree) {
+        await showMessage(
+          context,
+          message: 'You must agree to the Terms & Privacy Policy',
+          icon: Icons.warning_amber_rounded,
+          color: Colors.orangeAccent,
+        );
+        return;
+      }
 
-    if (!_agree) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You must agree to the Terms & Privacy Policy')),
+      await showMessage(
+        context,
+        message: 'Creating account...',
+        icon: Icons.person_add_alt_1_rounded,
+        color: Colors.blueAccent,
       );
-      return;
+
+      String partnerCode = ''; // ✅ Declare once here
+
+      try {
+        // 🔹 Create Firebase Auth account
+        UserCredential userCredential =
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
+
+        User? user = userCredential.user;
+
+        if (user != null) {
+          await user.sendEmailVerification();
+
+          // ✅ Generate unique partner code
+          partnerCode = _generatePartnerCode();
+
+          // 🔹 Save to Firestore
+          await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+            'name': _nameController.text.trim(),
+            'email': _emailController.text.trim(),
+            'partnerCode': partnerCode,
+            'linkedPartner': null,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+
+          if (!context.mounted) return;
+
+          await showMessage(
+            context,
+            message: 'Account created! Verify your email before signing in.',
+            icon: Icons.mark_email_read_outlined,
+            color: Colors.greenAccent,
+          );
+
+          // ✅ Show dialog with partner code
+          await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
+              title: const Text(
+                "Your Partner Code",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2d59f0),
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    "Share this code with your partner to link accounts:",
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2d59f0).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      partnerCode,
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                        color: Color(0xFF2d59f0),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    "Ask your caregiver or care receiver to enter this code on their home screen.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.black54, fontSize: 14),
+                  ),
+                ],
+              ),
+              actionsAlignment: MainAxisAlignment.center,
+              actions: [
+                TextButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: partnerCode));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Partner code copied to clipboard"),
+                        backgroundColor: Color(0xFF2d59f0),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.copy, color: Color(0xFF2d59f0)),
+                  label: const Text(
+                    "Copy Code",
+                    style: TextStyle(
+                      color: Color(0xFF2d59f0),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pushReplacementNamed(context, '/profileSelect');
+                  },
+                  child: const Text(
+                    "Continue",
+                    style: TextStyle(
+                      color: Color(0xFF2d59f0),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+      } on FirebaseAuthException catch (e) {
+        if (!context.mounted) return;
+
+        String message;
+        switch (e.code) {
+          case 'email-already-in-use':
+            message = 'This email is already registered.';
+            break;
+          case 'invalid-email':
+            message = 'Invalid email format.';
+            break;
+          case 'weak-password':
+            message = 'Password too weak.';
+            break;
+          case 'network-request-failed':
+            message = 'No internet connection.';
+            break;
+          default:
+            message = 'Sign-up failed. Please try again.';
+        }
+
+        await showMessage(
+          context,
+          message: message,
+          icon: Icons.error_outline,
+          color: Colors.redAccent,
+        );
+      } catch (e) {
+        if (!context.mounted) return;
+        await showMessage(
+          context,
+          message: 'Unexpected error: $e',
+          icon: Icons.error_outline,
+          color: Colors.redAccent,
+        );
+      }
+    } else {
+      await showMessage(
+        context,
+        message: 'Please fill out all required fields',
+        icon: Icons.info_outline,
+        color: Colors.redAccent,
+      );
     }
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -87,7 +265,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Logo
                 Align(
                   alignment: Alignment.topRight,
                   child: Image.asset(
@@ -109,7 +286,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 ),
                 const Text(
                   "Start your journey with us",
-                  style: TextStyle(fontFamily: "Poppins", fontSize: 16, color: Colors.grey),
+                  style: TextStyle(
+                    fontFamily: "Poppins",
+                    fontSize: 16,
+                    color: Colors.grey,
+                  ),
                 ),
 
                 const SizedBox(height: 30),
@@ -127,13 +308,22 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(15),
                           ),
+                          //  Border when NOT focused
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Colors.grey),
+                            borderSide: const BorderSide(
+                              color: Colors.grey, // <- normal border color
+                              width: 1.0,
+                            ),
                           ),
+
+                          //  Border when FOCUSED
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Color(0xFF2d59f0), width: 2),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF2d59f0), // <- focused border color
+                              width: 2.0,
+                            ),
                           ),
                         ),
                         validator: (value) =>
@@ -151,13 +341,22 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(15),
                           ),
+                          //  Border when NOT focused
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Colors.grey),
+                            borderSide: const BorderSide(
+                              color: Colors.grey, // <- normal border color
+                              width: 1.0,
+                            ),
                           ),
+
+                          //  Border when FOCUSED
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Color(0xFF2d59f0), width: 2),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF2d59f0), // <- focused border color
+                              width: 2.0,
+                            ),
                           ),
                         ),
                         validator: (value) =>
@@ -172,26 +371,37 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         decoration: InputDecoration(
                           labelText: "Password",
                           prefixIcon: const Icon(Icons.lock_outline),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Colors.grey),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Color(0xFF2d59f0), width: 2),
-                          ),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                              _obscurePassword
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
                             ),
                             onPressed: () {
                               setState(() {
                                 _obscurePassword = !_obscurePassword;
                               });
                             },
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          //  Border when NOT focused
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                            borderSide: const BorderSide(
+                              color: Colors.grey, // <- normal border color
+                              width: 1.0,
+                            ),
+                          ),
+
+                          //  Border when FOCUSED
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF2d59f0), // <- focused border color
+                              width: 2.0,
+                            ),
                           ),
                         ),
                         validator: (value) =>
@@ -206,17 +416,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         decoration: InputDecoration(
                           labelText: "Confirm Password",
                           prefixIcon: const Icon(Icons.lock_outline),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Colors.grey),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(15),
-                            borderSide: const BorderSide(color: Color(0xFF2d59f0), width: 2),
-                          ),
                           suffixIcon: IconButton(
                             icon: Icon(
                               _obscureConfirmPassword
@@ -228,6 +427,26 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                 _obscureConfirmPassword = !_obscureConfirmPassword;
                               });
                             },
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          //  Border when NOT focused
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                            borderSide: const BorderSide(
+                              color: Colors.grey, // <- normal border color
+                              width: 1.0,
+                            ),
+                          ),
+
+                          //  Border when FOCUSED
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF2d59f0), // <- focused border color
+                              width: 2.0,
+                            ),
                           ),
                         ),
                         validator: (value) {
@@ -268,7 +487,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                       color: Color(0xFF2d59f0),
                                       fontWeight: FontWeight.w600,
                                     ),
-                                    recognizer: TapGestureRecognizer()..onTap = _openTermsPage,
+                                    recognizer: TapGestureRecognizer()
+                                      ..onTap = _openTermsPage,
                                   ),
                                 ],
                               ),
@@ -277,7 +497,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         ],
                       ),
                       const SizedBox(height: 20),
-
 
                       // Sign Up Button
                       SizedBox(
@@ -291,17 +510,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30),
                             ),
-                            textStyle: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            elevation: 0, // flatter, cleaner look
                           ),
                           child: const Text("Sign Up"),
                         ),
                       ),
                       const SizedBox(height: 40),
-
 
                       // Already have account
                       Row(
@@ -312,16 +525,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             onPressed: () {
                               Navigator.pushNamed(context, '/signin');
                             },
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero, // Removes default button padding
-                              minimumSize: const Size(0, 0),  // Keeps it compact
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
                             child: const Text(
                               "Sign In Here",
                               style: TextStyle(
                                 color: Colors.blue,
-                                fontSize: 14,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -329,7 +536,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         ],
                       ),
 
-                      // Add a little bottom padding so button is not covered by bottom image
                       SizedBox(height: size.height * 0.25),
                     ],
                   ),
@@ -337,6 +543,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
               ],
             ),
           ),
+          const BackButtonOverlay(),
         ],
       ),
     );

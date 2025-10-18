@@ -1,18 +1,14 @@
+// lib/features/Calendar/calendar.dart
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:logger/logger.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
+import 'package:medi_care/widgets/back_button_overlay.dart';
+import '../Medication/add_medication.dart';
 
-// Create a logger instance (for debugging purposes during development)
-final logger = Logger();
-
-/// Enum that defines the different calendar views available
-/// - month: Standard monthly grid view
-/// - week: 7-day layout with summary cards
-/// - day: Focused view for a single day
 enum CalendarView { month, week, day }
 
-/// Main page that displays the user's medication or event schedule.
-/// Allows switching between month, week, and day views.
 class SchedulePage extends StatefulWidget {
   const SchedulePage({super.key});
 
@@ -21,335 +17,545 @@ class SchedulePage extends StatefulWidget {
 }
 
 class _SchedulePageState extends State<SchedulePage> {
-  // --- STATE VARIABLES ---
-
-  /// The day currently in focus by the calendar (used to navigate views)
   DateTime _focusedDay = DateTime.now();
-
-  /// The day the user has tapped on — defaults to today so it’s never null
   DateTime? _selectedDay = DateTime.now();
-
-  /// Controls which calendar view is currently displayed (month/week/day)
   CalendarView _currentView = CalendarView.month;
 
-  /// Stores reminders (like medications) for each day
-  /// The key is the date (without time), and the value is a list of reminders
-  final Map<DateTime, List<String>> _reminders = {};
-
-  // --- HELPER METHODS ---
-
-  /// Returns a list of reminders for a specific day.
-  /// If no reminders exist for that day, returns an empty list.
-  List<String> _getRemindersForDay(DateTime day) {
-    return _reminders[DateUtils.dateOnly(day)] ?? [];
+  /// ✅ Helper: Get the current or partner user ID
+  Future<String> _getTargetUserId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return '';
+    final userDoc =
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final partnerId = userDoc['linkedPartner'];
+    return partnerId ?? user.uid;
   }
 
-  /// Displays a dialog to add a new reminder for a given day.
-  /// Uses TextEditingController to capture the user’s input.
-  void _addReminder(BuildContext context, DateTime day) {
-    final controller = TextEditingController();
+  /// ✅ Shared meds stream for both caregiver and receiver
+  Stream<List<Map<String, dynamic>>> _getMedicationsStream() async* {
+    final targetUserId = await _getTargetUserId();
 
-    showDialog(
+    yield* FirebaseFirestore.instance
+        .collection('users')
+        .doc(targetUserId)
+        .collection('medications')
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+      final data = d.data();
+      return {
+        'id': d.id,
+        'ownerId': targetUserId,                // <-- add this
+        'name': data['name'] ?? 'Unknown',
+        'time': data['time'] ?? '',
+        'dosage': data['dosage'],
+        'repeat': data['repeat'] ?? 'Once',
+        'taken': data['taken'] ?? false,
+        'date': data['date'] ?? '',
+      };
+    }).toList());
+  }
+
+  /// ✅ Toggle taken state — syncs for both users
+  Future<void> _toggleTaken({
+    required String ownerId,
+    required String id,
+    required bool current,
+  }) async {
+    // Read the doc from the collection that actually owns it
+    final ownerRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
+    final medSnap = await ownerRef.collection('medications').doc(id).get();
+    if (!medSnap.exists) return;
+
+    final medData = medSnap.data()!;
+    final newStatus = !current;
+
+    // Update owner’s doc
+    await medSnap.reference.update({'taken': newStatus});
+
+    // Find linked partner from the OWNER record
+    final ownerUserDoc = await ownerRef.get();
+    final partnerId = ownerUserDoc.data()?['linkedPartner'];
+
+    // Mirror to partner if linked (by matching fields)
+    if (partnerId != null && partnerId.toString().isNotEmpty) {
+      final partnerMedRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(partnerId)
+          .collection('medications');
+
+      final match = await partnerMedRef
+          .where('name', isEqualTo: medData['name'])
+          .where('time', isEqualTo: medData['time'])
+          .where('date', isEqualTo: medData['date'])
+          .get();
+
+      for (var doc in match.docs) {
+        await partnerMedRef.doc(doc.id).update({'taken': newStatus});
+      }
+    }
+  }
+
+  /// ✅ Delete medication — syncs for both users
+  Future<void> _deleteMed({
+    required String ownerId,
+    required String id,
+    required String name,
+  }) async {
+    // Confirm first (nice dialog)
+    final ok = await _confirmDelete(name);
+    if (ok != true) return;
+
+    final ownerRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
+    final medSnap = await ownerRef.collection('medications').doc(id).get();
+    if (!medSnap.exists) return;
+
+    final medData = medSnap.data()!;
+
+    // Delete owner’s doc
+    await medSnap.reference.delete();
+
+    // Mirror delete to partner if linked
+    final ownerUserDoc = await ownerRef.get();
+    final partnerId = ownerUserDoc.data()?['linkedPartner'];
+    if (partnerId != null && partnerId.toString().isNotEmpty) {
+      final partnerMedRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(partnerId)
+          .collection('medications');
+
+      final match = await partnerMedRef
+          .where('name', isEqualTo: medData['name'])
+          .where('time', isEqualTo: medData['time'])
+          .where('date', isEqualTo: medData['date'])
+          .get();
+
+      for (var doc in match.docs) {
+        await partnerMedRef.doc(doc.id).delete();
+      }
+    }
+
+    // Snackbar feedback
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Medication deleted'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<bool> _confirmDelete(String medName) async {
+    final result = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Add Reminder"),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: "Enter reminder"),
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: const [
+            Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+            SizedBox(width: 10),
+            Text("Confirm Deletion", style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
         ),
+        content: Text(
+          'Are you sure you want to delete "$medName"?',
+          style: const TextStyle(color: Colors.black87, fontSize: 16),
+        ),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
         actions: [
           TextButton(
-            onPressed: () {
-              setState(() {
-                // Normalize date to remove time component
-                final d = DateUtils.dateOnly(day);
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.grey,
+              textStyle: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+            label: const Text("Delete"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
 
-                // Add new reminder to the list for this date
-                _reminders[d] = [...?_reminders[d], controller.text];
+  /// ✅ Filter meds per selected day
+  List<Map<String, dynamic>> _filterForDay(
+      List<Map<String, dynamic>> meds, DateTime day) {
+    final dayStr = DateFormat('yyyy-MM-dd').format(day);
+    return meds.where((m) {
+      final repeat = (m['repeat'] ?? 'Once') as String;
+      final medDateStr = (m['date'] ?? '') as String;
 
-                // Debug logs (disabled for now)
-                // logger.d("Reminder added for $d: ${controller.text}");
-                // logger.d("Current reminders: $_reminders");
-              });
-              Navigator.pop(context);
-            },
-            child: const Text("Save"),
+      if (repeat == 'Daily') return true;
+      if (repeat == 'Weekly') {
+        if (medDateStr.isEmpty) return false;
+        final medDate = DateFormat('yyyy-MM-dd').parse(medDateStr);
+        return medDate.weekday == day.weekday;
+      }
+      return medDateStr == dayStr;
+    }).toList();
+  }
+
+  /// ✅ Header
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Text(
+              "My Medication Schedule",
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF2d59f0),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Wrap(
+              spacing: 4,
+              children: [
+                _viewChip(CalendarView.month, "Month"),
+                _viewChip(CalendarView.week, "Week"),
+                _viewChip(CalendarView.day, "Day"),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// Builds a small red dot marker under a date if that day has reminders.
-  Widget _buildMarker(DateTime day) {
-    if (_reminders.containsKey(day) && _reminders[day]!.isNotEmpty) {
-      return Positioned(
-        bottom: 1,
-        child: Container(
-          width: 7,
-          height: 7,
-          decoration: const BoxDecoration(
+  /// ✅ View selector
+  Widget _viewChip(CalendarView view, String label) {
+    final active = _currentView == view;
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () => setState(() => _currentView = view),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFF2d59f0) : Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : const Color(0xFF2d59f0),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ✅ Calendar
+  Widget _buildCalendar() {
+    final format = _currentView == CalendarView.week
+        ? CalendarFormat.week
+        : CalendarFormat.month;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: TableCalendar(
+        focusedDay: _focusedDay,
+        firstDay: DateTime.utc(2020, 1, 1),
+        lastDay: DateTime.utc(2030, 12, 31),
+        calendarFormat: format,
+        selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+        onDaySelected: (selectedDay, focusedDay) {
+          setState(() {
+            _selectedDay = selectedDay;
+            _focusedDay = focusedDay;
+          });
+        },
+        availableGestures: AvailableGestures.all,
+        headerStyle: HeaderStyle(
+          formatButtonVisible: false,
+          titleCentered: true,
+          titleTextStyle: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: Color(0xFF2d59f0),
+          ),
+        ),
+        calendarStyle: CalendarStyle(
+          todayDecoration: BoxDecoration(
+            color: Colors.blue.shade100,
             shape: BoxShape.circle,
-            color: Colors.red,
           ),
-        ),
-      );
-    }
-    return const SizedBox(); // No marker if there are no reminders
-  }
-
-  // --- CALENDAR VIEW BUILDERS ---
-
-  /// Monthly calendar view showing all days in grid form
-  /// Displays reminders below the calendar for the selected day
-  Widget _buildMonthlyView() {
-    return Column(
-      children: [
-        TableCalendar(
-          focusedDay: _focusedDay,
-          firstDay: DateTime.utc(2020, 1, 1),
-          lastDay: DateTime.utc(2030, 12, 31),
-          calendarFormat: CalendarFormat.month,
-          selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-          onDaySelected: (selectedDay, focusedDay) {
-            setState(() {
-              _selectedDay = selectedDay;
-              _focusedDay = focusedDay;
-            });
-          },
-          calendarBuilders: CalendarBuilders(
-            markerBuilder: (context, date, _) {
-              return _buildMarker(DateUtils.dateOnly(date));
-            },
+          selectedDecoration: const BoxDecoration(
+            color: Color(0xFF2d59f0),
+            shape: BoxShape.circle,
           ),
+          outsideDaysVisible: false,
         ),
-        const SizedBox(height: 16),
-        // Display the list of reminders for the selected day
-        Expanded(
-          child: ListView(
-            children: _getRemindersForDay(_selectedDay ?? _focusedDay)
-                .map((r) => ListTile(
-              leading: const Icon(Icons.medical_services),
-              title: Text(r),
-            ))
-                .toList(),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  /// Weekly view – shows 7 cards (Mon–Sun), each with that day's reminders.
-  /// Allows users to see an overview of the week at a glance.
-  Widget _buildWeeklyView() {
-    // Determine Monday of the current week
-    final monday = _focusedDay.subtract(Duration(days: _focusedDay.weekday - 1));
-    final daysOfWeek = List.generate(7, (i) => monday.add(Duration(days: i)));
+  /// ✅ Medication card
+  Widget _medCard(Map<String, dynamic> med) {
+    final isTaken = med['taken'] == true;
+    final themeColor = const Color(0xFF2d59f0);
+    final color = isTaken ? Colors.green : themeColor;
 
-    return Column(
-      children: [
-        // Use TableCalendar in week format for navigation and selection
-        TableCalendar(
-          focusedDay: _focusedDay,
-          firstDay: DateTime.utc(2020, 1, 1),
-          lastDay: DateTime.utc(2030, 12, 31),
-          calendarFormat: CalendarFormat.week,
-          selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-          onDaySelected: (selectedDay, focusedDay) {
-            setState(() {
-              _selectedDay = selectedDay;
-              _focusedDay = focusedDay;
-            });
-          },
-          calendarBuilders: CalendarBuilders(
-            markerBuilder: (context, date, _) {
-              return _buildMarker(DateUtils.dateOnly(date));
-            },
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // --- Weekly reminder grid (2 boxes per row) ---
-        Expanded(
-          child: GridView.builder(
-            itemCount: daysOfWeek.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2, // Two day boxes per row
-              childAspectRatio: 1.3, // Adjust height
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Material(
+          color: Colors.white,
+          elevation: 2,
+          child: ExpansionTile(
+            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+            leading: CircleAvatar(
+              radius: 22,
+              backgroundColor: color.withOpacity(0.15),
+              child: Icon(Icons.medical_services_rounded, color: color, size: 22),
             ),
-            itemBuilder: (context, index) {
-              final day = daysOfWeek[index];
-              final reminders = _getRemindersForDay(day);
-
-              return Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 3,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Header showing day name and date
-                      Text(
-                        "${day.weekday == DateTime.monday ? 'Mon' : day.weekday == DateTime.tuesday ? 'Tue' : day.weekday == DateTime.wednesday ? 'Wed' : day.weekday == DateTime.thursday ? 'Thu' : day.weekday == DateTime.friday ? 'Fri' : day.weekday == DateTime.saturday ? 'Sat' : 'Sun'} ${day.day}/${day.month}",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      // Show either “No pills” or list of reminders
-                      if (reminders.isEmpty)
-                        const Text("No pills", style: TextStyle(color: Colors.grey))
-                      else
-                        ...reminders.map((pill) => Text("• $pill")),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Daily view – focuses on a single day with navigation arrows.
-  /// Designed for detailed review of that day's reminders.
-  Widget _buildDailyView() {
-    final day = _selectedDay ?? _focusedDay;
-    return Column(
-      children: [
-        const SizedBox(height: 16),
-
-        // --- Header with navigation arrows and day label ---
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Left arrow to go to previous day
-            IconButton(
-              icon: const Icon(Icons.arrow_left),
-              iconSize: 50, // Larger arrow for better visibility
-              onPressed: () {
-                setState(() {
-                  _selectedDay = day.subtract(const Duration(days: 1));
-                  _focusedDay = _selectedDay!;
-                });
-              },
+            title: Text(
+              med['name'] ?? 'Medication',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
             ),
-
-            // Middle box displaying the current day
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                "${med['time'] ?? ''}  •  ${med['dosage'] ?? 'N/A'}",
+                style: const TextStyle(color: Colors.black54),
+              ),
+            ),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.blue.shade200,
-                borderRadius: BorderRadius.circular(12),
+                color: isTaken ? Colors.green[100] : Colors.orange[100],
+                borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                "${day.weekday == DateTime.monday ? 'Monday' : day.weekday == DateTime.tuesday ? 'Tuesday' : day.weekday == DateTime.wednesday ? 'Wednesday' : day.weekday == DateTime.thursday ? 'Thursday' : day.weekday == DateTime.friday ? 'Friday' : day.weekday == DateTime.saturday ? 'Saturday' : 'Sunday'} ${day.day}/${day.month}/${day.year}",
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                isTaken ? 'Taken' : 'Pending',
+                style: TextStyle(
+                  color: isTaken ? Colors.green[900] : Colors.orange[900],
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.schedule, size: 18, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  Text(med['time'] ?? ''),
+                  const Spacer(),
+                  const Icon(Icons.repeat, size: 18, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  Text(med['repeat'] ?? 'Once'),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: themeColor),
+                      foregroundColor: themeColor,
+                    ),
+                    onPressed: () async => _toggleTaken(
+                      ownerId: med['ownerId'],     // <-- pass the ownerId
+                      id: med['id'],
+                      current: isTaken,
+                    ),
+                    icon: Icon(isTaken ? Icons.undo : Icons.check_circle_outline),
+                    label: Text(isTaken ? 'Mark Pending' : 'Mark Taken'),
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: themeColor),
+                      foregroundColor: themeColor,
+                    ),
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                          title: Row(
+                            children: const [
+                              Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+                              SizedBox(width: 10),
+                              Text("Confirm Deletion", style: TextStyle(fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                          content: Text(
+                            'Are you sure you want to delete "${med['name']}"?',
+                            style: const TextStyle(color: Colors.black87, fontSize: 16),
+                          ),
+                          actionsPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                          actions: [
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.grey[700],
+                                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text("Cancel"),
+                            ),
+                            ElevatedButton.icon(
+                              onPressed: () => Navigator.pop(context, true),
+                              icon: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+                              label: const Text("Delete"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (ok == true)  await _deleteMed(
+                        ownerId: med['ownerId'],   // <-- pass the ownerId
+                        id: med['id'],
+                        name: med['name'] ?? 'Medication',
+                      );
+                    },
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Delete'),
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: themeColor),
+                      foregroundColor: themeColor,
+                    ),
+                    onPressed: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AddMedicationScreen(
+                              initialDate: _selectedDay ?? _focusedDay),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Edit'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-            // Right arrow to go to next day
-            IconButton(
-              icon: const Icon(Icons.arrow_right),
-              iconSize: 50,
-              onPressed: () {
-                setState(() {
-                  _selectedDay = day.add(const Duration(days: 1));
-                  _focusedDay = _selectedDay!;
-                });
-              },
+  /// ✅ Build UI
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF9FAFF),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 70),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(),
+                    _buildCalendar(),
+                    StreamBuilder<List<Map<String, dynamic>>>(
+                      stream: _getMedicationsStream(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const Padding(
+                            padding: EdgeInsets.only(top: 40),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        final meds = _filterForDay(
+                            snapshot.data!, _selectedDay ?? _focusedDay);
+                        if (meds.isEmpty) {
+                          return const Padding(
+                            padding: EdgeInsets.only(top: 24),
+                            child: Center(
+                              child: Text(
+                                "No medications for this day",
+                                style:
+                                TextStyle(color: Colors.grey, fontSize: 16),
+                              ),
+                            ),
+                          );
+                        }
+                        return Column(
+                          children: meds.map(_medCard).toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 120),
+                  ],
+                ),
+              ),
+            ),
+            const Positioned(top: 10, left: 10, child: BackButtonOverlay()),
+            Positioned(
+              bottom: 24,
+              right: 24,
+              child: FloatingActionButton(
+                backgroundColor: const Color(0xFF2d59f0),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AddMedicationScreen(
+                          initialDate: _selectedDay ?? _focusedDay),
+                    ),
+                  );
+                },
+                child: const Icon(Icons.add, color: Colors.white),
+              ),
             ),
           ],
         ),
-
-        const SizedBox(height: 16),
-
-        // --- List of reminders for the current day ---
-        Expanded(
-          child: ListView(
-            children: _getRemindersForDay(day)
-                .map((r) => ListTile(
-              leading: const Icon(Icons.medical_services),
-              title: Text(r),
-            ))
-                .toList(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // --- MAIN BUILD METHOD ---
-  @override
-  Widget build(BuildContext context) {
-    // Select which view to render based on _currentView
-    Widget body;
-    switch (_currentView) {
-      case CalendarView.month:
-        body = _buildMonthlyView();
-        break;
-      case CalendarView.week:
-        body = _buildWeeklyView();
-        break;
-      case CalendarView.day:
-        body = _buildDailyView();
-        break;
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Schedule"),
-        // Show a back arrow only for week/day views
-        leading: _currentView == CalendarView.month
-            ? null
-            : IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            setState(() {
-              // Step backwards in the hierarchy (Day → Week → Month)
-              if (_currentView == CalendarView.day) {
-                _currentView = CalendarView.week;
-              } else if (_currentView == CalendarView.week) {
-                _currentView = CalendarView.month;
-              }
-            });
-          },
-        ),
-        actions: [
-          // Dropdown menu to switch between views
-          PopupMenuButton<CalendarView>(
-            onSelected: (view) {
-              setState(() {
-                _currentView = view;
-              });
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                  value: CalendarView.month, child: Text("Month")),
-              const PopupMenuItem(
-                  value: CalendarView.week, child: Text("Week")),
-              const PopupMenuItem(
-                  value: CalendarView.day, child: Text("Day")),
-            ],
-          ),
-        ],
-      ),
-
-      body: body,
-
-      // Floating Action Button for adding reminders
-      // Only visible when a valid day is selected and we’re not in day view
-      floatingActionButton: _currentView == CalendarView.day ||
-          _selectedDay == null
-          ? null
-          : FloatingActionButton(
-        onPressed: () => _addReminder(context, _selectedDay!),
-        child: const Icon(Icons.add),
       ),
     );
   }

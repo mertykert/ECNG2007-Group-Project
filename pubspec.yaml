@@ -14,9 +14,21 @@ dependencies:
   flutter:
     sdk: flutter
 
-  table_calendar: ^3.0.9
-  #logger: ^2.0.2 may not need
+  # Firebase packages
+  firebase_core: ^3.4.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.6.0
 
+  rxdart: ^0.28.0
+
+  # Calendar
+  table_calendar: ^3.0.9
+
+  #Graph
+  fl_chart: ^0.69.0
+
+  #Messages
+  another_flushbar: ^1.12.30
 
   # Utility Packages
   http: ^1.2.2
@@ -24,8 +36,6 @@ dependencies:
   logger: ^2.2.0
   url_launcher: ^6.2.2
   flutter_native_splash: ^2.4.6
-
-
 
   # Icons
   iconsax: ^0.0.8
@@ -36,38 +46,28 @@ dependencies:
   get_storage: ^2.1.1
 
   # Product Specific
+  # (Add any additional runtime packages here)
 
-
-  #--------------- ./ PACKAGES END ---------------#
+#--------------- ./ PACKAGES END ---------------#
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
-
   flutter_lints: ^3.0.0
-
 
 flutter:
   uses-material-design: true
-
-
-  #----------------- LOCAL ASSETS -------------------#
 
   assets:
     - assets/logos/
     - assets/fonts/
     - assets/images/
 
- #----------------- LOCAL FONTS ---------------------#
 fonts:
-    - family: Roboto
-      fonts:
-        - asset: assets/fonts/Roboto-Italic-VariableFont_wdth,wght.ttf
-        - style: italic
-          asset: assets/fonts/Roboto-VariableFont_wdth,wght.ttf
-          weight: 400
-
-
-
-
+  - family: Roboto
+    fonts:
+      - asset: assets/fonts/Roboto-Italic-VariableFont_wdth,wght.ttf
+      - style: italic
+        asset: assets/fonts/Roboto-VariableFont_wdth,wght.ttf
+        weight: 400

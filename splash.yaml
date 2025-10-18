@@ -3,16 +3,13 @@ flutter_native_splash:
   ios: true
   web: false
 
-  color: "#FFFFFF"
-  color_dark: "#272727"
-  image: assets/logos/Medi_Care-splash-logo-black.jpeg
-  image_dark: assets/logos/Medi_Care-splash-logo-white.jpeg
+  color: "#F7F9FC"
+  color_dark: "#121212"
 
   android_12:
-    color: "#FFFFFF"
-    color_dark: "#272727"
-    image: assets/logos/Medi_Care-splash-logo-black.jpeg
-    image_dark: assets/logos/Medi_Care-splash-logo-white.jpeg
+    color: "#F7F9FC"
+    color_dark: "#121212"
 
-
-
+  fullscreen: true
+  android_gravity: center
+  ios_content_mode: scaleAspectFill
