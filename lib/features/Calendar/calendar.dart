@@ -21,7 +21,7 @@ class _SchedulePageState extends State<SchedulePage> {
   DateTime? _selectedDay = DateTime.now();
   CalendarView _currentView = CalendarView.month;
 
-  /// ✅ Helper: Get the current or partner user ID
+  ///  Helper: Get the current or partner user ID
   Future<String> _getTargetUserId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return '';
@@ -31,52 +31,83 @@ class _SchedulePageState extends State<SchedulePage> {
     return partnerId ?? user.uid;
   }
 
-  /// ✅ Shared meds stream for both caregiver and receiver
+  ///  Shared meds stream for both caregiver and receiver
+  ///  Updated: Stream medications with per-day taken tracking
   Stream<List<Map<String, dynamic>>> _getMedicationsStream() async* {
     final targetUserId = await _getTargetUserId();
 
-    yield* FirebaseFirestore.instance
+    final medsStream = FirebaseFirestore.instance
         .collection('users')
         .doc(targetUserId)
         .collection('medications')
-        .snapshots()
-        .map((snap) => snap.docs.map((d) {
-      final data = d.data();
-      return {
-        'id': d.id,
-        'ownerId': targetUserId,                // <-- add this
-        'name': data['name'] ?? 'Unknown',
-        'time': data['time'] ?? '',
-        'dosage': data['dosage'],
-        'repeat': data['repeat'] ?? 'Once',
-        'taken': data['taken'] ?? false,
-        'date': data['date'] ?? '',
-      };
-    }).toList());
+        .snapshots();
+
+    await for (final snap in medsStream) {
+      final meds = await Future.wait(snap.docs.map((d) async {
+        final data = d.data();
+        final medId = d.id;
+        final ownerId = targetUserId;
+
+        //  Check if marked taken for selected date
+        final dayKey = DateFormat('yyyy-MM-dd')
+            .format(_selectedDay ?? DateTime.now());
+        final logSnap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(ownerId)
+            .collection('medications')
+            .doc(medId)
+            .collection('taken_log')
+            .doc(dayKey)
+            .get();
+
+        final isTaken = logSnap.exists && (logSnap['taken'] == true);
+
+        return {
+          'id': medId,
+          'ownerId': ownerId,
+          'name': data['name'] ?? 'Unknown',
+          'time': data['time'] ?? '',
+          'dosage': data['dosage'],
+          'repeat': data['repeat'] ?? 'Once',
+          'taken': isTaken,
+          'date': data['date'] ?? '',
+        };
+      }).toList());
+
+      yield meds; //  Emit list after processing
+    }
   }
 
-  /// ✅ Toggle taken state — syncs for both users
+  ///  Toggle taken state — syncs for both users
+  /// Toggle taken state for a specific date (per-day tracking)
   Future<void> _toggleTaken({
     required String ownerId,
     required String id,
     required bool current,
   }) async {
-    // Read the doc from the collection that actually owns it
     final ownerRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
-    final medSnap = await ownerRef.collection('medications').doc(id).get();
+    final medRef = ownerRef.collection('medications').doc(id);
+
+    final medSnap = await medRef.get();
     if (!medSnap.exists) return;
 
     final medData = medSnap.data()!;
     final newStatus = !current;
 
-    // Update owner’s doc
-    await medSnap.reference.update({'taken': newStatus});
+    //  Use selectedDay or fallback to today's date
+    final selectedDate = DateFormat('yyyy-MM-dd')
+        .format(_selectedDay ?? DateTime.now());
 
-    // Find linked partner from the OWNER record
+    // Update taken_log for this specific date
+    await medRef
+        .collection('taken_log')
+        .doc(selectedDate)
+        .set({'taken': newStatus}, SetOptions(merge: true));
+
+    //  Mirror to partner if linked
     final ownerUserDoc = await ownerRef.get();
     final partnerId = ownerUserDoc.data()?['linkedPartner'];
 
-    // Mirror to partner if linked (by matching fields)
     if (partnerId != null && partnerId.toString().isNotEmpty) {
       final partnerMedRef = FirebaseFirestore.instance
           .collection('users')
@@ -86,16 +117,19 @@ class _SchedulePageState extends State<SchedulePage> {
       final match = await partnerMedRef
           .where('name', isEqualTo: medData['name'])
           .where('time', isEqualTo: medData['time'])
-          .where('date', isEqualTo: medData['date'])
           .get();
 
       for (var doc in match.docs) {
-        await partnerMedRef.doc(doc.id).update({'taken': newStatus});
+        await partnerMedRef
+            .doc(doc.id)
+            .collection('taken_log')
+            .doc(selectedDate)
+            .set({'taken': newStatus}, SetOptions(merge: true));
       }
     }
   }
 
-  /// ✅ Delete medication — syncs for both users
+  ///  Delete medication — syncs for both users
   Future<void> _deleteMed({
     required String ownerId,
     required String id,
@@ -192,7 +226,7 @@ class _SchedulePageState extends State<SchedulePage> {
     return result ?? false;
   }
 
-  /// ✅ Filter meds per selected day
+  ///  Filter meds per selected day
   List<Map<String, dynamic>> _filterForDay(
       List<Map<String, dynamic>> meds, DateTime day) {
     final dayStr = DateFormat('yyyy-MM-dd').format(day);
@@ -210,7 +244,7 @@ class _SchedulePageState extends State<SchedulePage> {
     }).toList();
   }
 
-  /// ✅ Header
+  ///  Header
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -249,7 +283,7 @@ class _SchedulePageState extends State<SchedulePage> {
     );
   }
 
-  /// ✅ View selector
+  ///  View selector
   Widget _viewChip(CalendarView view, String label) {
     final active = _currentView == view;
     return InkWell(
@@ -272,8 +306,24 @@ class _SchedulePageState extends State<SchedulePage> {
     );
   }
 
-  /// ✅ Calendar
+  ///  Calendar
   Widget _buildCalendar() {
+    if (_currentView == CalendarView.day) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: Text(
+            DateFormat('EEEE, d MMMM yyyy').format(_selectedDay ?? _focusedDay),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2d59f0),
+            ),
+          ),
+        ),
+      );
+    }
+
     final format = _currentView == CalendarView.week
         ? CalendarFormat.week
         : CalendarFormat.month;
@@ -328,7 +378,7 @@ class _SchedulePageState extends State<SchedulePage> {
     );
   }
 
-  /// ✅ Medication card
+  ///  Medication card
   Widget _medCard(Map<String, dynamic> med) {
     final isTaken = med['taken'] == true;
     final themeColor = const Color(0xFF2d59f0);

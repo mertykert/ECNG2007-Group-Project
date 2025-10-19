@@ -39,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // 🔹 Load current user or partner UID
+  //  Load current user or partner UID
   Future<String> _getTargetUserId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return '';
@@ -48,7 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return doc['linkedPartner'] ?? user.uid;
   }
 
-  // 🔹 Load user name
+  //  Load user name
   Future<void> _loadCaregiverName() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -130,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return result ?? false;
   }
 
-  // 🔹 Listen for medication updates
+  //  Listen for medication updates
   void _setupMedicationsListener() async {
     final targetUserId = await _getTargetUserId();
     if (targetUserId.isEmpty) return;
@@ -152,8 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadTodayProgress(targetUserId);
   }
 
-  // 🔹 Merge current user + partner meds for today
-  // REPLACE your existing _getTodayMedicationsStream with this:
+  //  Merge current user + partner meds for today
 
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _getTodayMedicationsStream() async* {
     final user = FirebaseAuth.instance.currentUser;
@@ -211,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 
 
-  // 🔹 Toggle taken status
+  //  Toggle taken status
   Future<void> _markAsTaken(String ownerId, String id, bool currentStatus) async {
     final userRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
     final medSnap = await userRef.collection('medications').doc(id).get();
@@ -223,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // update current owner's medication
     await medSnap.reference.update({'taken': newStatus});
 
-    // 🔁 find linked partner
+    //  find linked partner
     final ownerDoc = await FirebaseFirestore.instance.collection('users').doc(ownerId).get();
     final partnerId = ownerDoc['linkedPartner'];
     if (partnerId == null || partnerId.toString().isEmpty) return;
@@ -249,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
-  // 🔹 Delete medication
+  //  Delete medication
   Future<void> _deleteMedication(String ownerId, String id) async {
     final userRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
     final medSnap = await userRef.collection('medications').doc(id).get();
@@ -260,7 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     await medSnap.reference.delete();
 
-    // 🔁 also delete from linked partner
+    //  also delete from linked partner
     final ownerDoc = await FirebaseFirestore.instance.collection('users').doc(ownerId).get();
     final partnerId = ownerDoc['linkedPartner'];
     if (partnerId != null && partnerId.toString().isNotEmpty) {
@@ -309,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
-  // 🔹 Load today's progress
+  //  Load today's progress
   Future<void> _loadTodayProgress(String uid) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -349,7 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // 🔹 Load weekly progress
+  //  Load weekly progress
   Future<void> _loadWeeklyProgress(String uid) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;

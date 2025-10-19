@@ -59,7 +59,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         color: Colors.blueAccent,
       );
 
-      String partnerCode = ''; // ✅ Declare once here
+      String partnerCode = ''; //  Declare once here
 
       try {
         // 🔹 Create Firebase Auth account
