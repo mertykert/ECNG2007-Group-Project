@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import 'package:medi_care/widgets/back_button_overlay.dart';
 import '../Medication/add_medication.dart';
 
+Map<String, bool> _localTakenCache = {};
+
 enum CalendarView { month, week, day }
 
 class SchedulePage extends StatefulWidget {
@@ -85,49 +87,62 @@ class _SchedulePageState extends State<SchedulePage> {
     required String id,
     required bool current,
   }) async {
+    final selectedDate = DateFormat('yyyy-MM-dd')
+        .format(_selectedDay ?? DateTime.now());
+    final localKey = '$id|$selectedDate'; // unique per day
+
+    // ---  Instant visual toggle (optimistic UI) ---
+    setState(() {
+      _localTakenCache[localKey] = !current;
+    });
+
+    // ---  Firestore write ---
     final ownerRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
     final medRef = ownerRef.collection('medications').doc(id);
 
-    final medSnap = await medRef.get();
-    if (!medSnap.exists) return;
+    try {
+      final medSnap = await medRef.get();
+      if (!medSnap.exists) return;
+      final medData = medSnap.data()!;
+      final newStatus = !current;
 
-    final medData = medSnap.data()!;
-    final newStatus = !current;
+      // Store taken status for this date only
+      await medRef
+          .collection('taken_log')
+          .doc(selectedDate)
+          .set({'taken': newStatus}, SetOptions(merge: true));
 
-    //  Use selectedDay or fallback to today's date
-    final selectedDate = DateFormat('yyyy-MM-dd')
-        .format(_selectedDay ?? DateTime.now());
+      // Mirror to partner (if linked)
+      final ownerUserDoc = await ownerRef.get();
+      final partnerId = ownerUserDoc.data()?['linkedPartner'];
 
-    // Update taken_log for this specific date
-    await medRef
-        .collection('taken_log')
-        .doc(selectedDate)
-        .set({'taken': newStatus}, SetOptions(merge: true));
+      if (partnerId != null && partnerId.toString().isNotEmpty) {
+        final partnerMedRef = FirebaseFirestore.instance
+            .collection('users')
+            .doc(partnerId)
+            .collection('medications');
 
-    //  Mirror to partner if linked
-    final ownerUserDoc = await ownerRef.get();
-    final partnerId = ownerUserDoc.data()?['linkedPartner'];
+        final match = await partnerMedRef
+            .where('name', isEqualTo: medData['name'])
+            .where('time', isEqualTo: medData['time'])
+            .get();
 
-    if (partnerId != null && partnerId.toString().isNotEmpty) {
-      final partnerMedRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(partnerId)
-          .collection('medications');
-
-      final match = await partnerMedRef
-          .where('name', isEqualTo: medData['name'])
-          .where('time', isEqualTo: medData['time'])
-          .get();
-
-      for (var doc in match.docs) {
-        await partnerMedRef
-            .doc(doc.id)
-            .collection('taken_log')
-            .doc(selectedDate)
-            .set({'taken': newStatus}, SetOptions(merge: true));
+        for (var doc in match.docs) {
+          await partnerMedRef
+              .doc(doc.id)
+              .collection('taken_log')
+              .doc(selectedDate)
+              .set({'taken': newStatus}, SetOptions(merge: true));
+        }
       }
+    } catch (e) {
+      // --- 3️ Rollback if failed ---
+      setState(() {
+        _localTakenCache.remove(localKey);
+      });
     }
   }
+
 
   ///  Delete medication — syncs for both users
   Future<void> _deleteMed({
@@ -380,7 +395,11 @@ class _SchedulePageState extends State<SchedulePage> {
 
   ///  Medication card
   Widget _medCard(Map<String, dynamic> med) {
-    final isTaken = med['taken'] == true;
+    final selectedDate = DateFormat('yyyy-MM-dd').format(_selectedDay ?? DateTime.now());
+    final localKey = '${med['id']}|$selectedDate';
+    final isTaken = _localTakenCache.containsKey(localKey)
+        ? _localTakenCache[localKey]!
+        : (med['taken'] == true);
     final themeColor = const Color(0xFF2d59f0);
     final color = isTaken ? Colors.green : themeColor;
 
@@ -537,7 +556,7 @@ class _SchedulePageState extends State<SchedulePage> {
     );
   }
 
-  /// ✅ Build UI
+  ///  Build UI
   @override
   Widget build(BuildContext context) {
     return Scaffold(

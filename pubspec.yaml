@@ -19,6 +19,10 @@ dependencies:
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.6.0
 
+  lottie: ^3.1.2
+
+  shared_preferences: ^2.3.2
+
   rxdart: ^0.28.0
 
   # Calendar
@@ -60,6 +64,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/animations/
     - assets/logos/
     - assets/fonts/
     - assets/images/
@@ -71,3 +76,23 @@ fonts:
       - style: italic
         asset: assets/fonts/Roboto-VariableFont_wdth,wght.ttf
         weight: 400
+
+flutter_native_splash:
+  android: true
+  ios: true
+  web: false
+
+  # Solid blue background (your app theme color)
+  color: "#2D59F0"
+  color_dark: "#2D59F0"
+
+  # Solid logo (non-transparent)
+  image: assets/images/medcross.png
+
+  android_12:
+    image: assets/images/medcross.png
+    icon_background_color: "#2D59F0"
+
+  fullscreen: true
+  android_gravity: center
+  ios_content_mode: scaleAspectFit

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:medi_care/widgets/back_button_overlay.dart';
-import 'package:medi_care/widgets/show_message.dart'; // ✅ import modern toast helper
+import 'package:medi_care/widgets/show_message.dart'; //  import modern toast helper
+import 'package:shared_preferences/shared_preferences.dart';
+
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -70,6 +72,8 @@ class _SignInScreenState extends State<SignInScreen> {
           icon: Icons.check_circle_outline,
           color: Colors.greenAccent,
         );
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isLoggedInOnce', true);
       } on FirebaseAuthException catch (e) {
         String message;
         switch (e.code) {

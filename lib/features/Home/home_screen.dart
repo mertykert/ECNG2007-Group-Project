@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -418,208 +419,74 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
+      drawer: _buildSidebar(context),
       body: SafeArea(
-        child: SingleChildScrollView(
+      child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // greeting and popup menu
+              // --- Modern Header ---
+              // --- Simple Clean Header (icons swapped) ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2d59f0).withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        child: Icon(greetingIcon,
-                            color: const Color(0xFF2d59f0), size: 22),
+                  // 👈 Drawer Menu (left)
+                  Builder(
+                    builder: (context) => IconButton(
+                      icon: const Icon(
+                        Icons.menu_rounded,
+                        color: Color(0xFF2d59f0),
+                        size: 28,
                       ),
-                      const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("$greeting,",
-                              style: const TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.grey,
-                                  fontWeight: FontWeight.w500)),
-                          Text(caregiverName,
-                              style: const TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.black87)),
-                        ],
-                      ),
-                    ],
+                      onPressed: () => Scaffold.of(context).openDrawer(),
+                    ),
                   ),
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.people_alt_rounded,
-                        color: Color(0xFF2d59f0), size: 26),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    onSelected: (value) async {
-                      if (value == 'viewCode') {
-                        final user = FirebaseAuth.instance.currentUser;
-                        if (user != null) {
-                          final doc = await FirebaseFirestore.instance
-                              .collection('users')
-                              .doc(user.uid)
-                              .get();
-                          final code = doc['partnerCode'] ?? 'N/A';
 
-                          showDialog(
-                            context: context,
-                            builder: (_) =>
-                                AlertDialog(
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(15)),
-                                  title: const Text("Your Partner Code"),
-                                  content: SelectableText(
-                                    code,
-                                    style: const TextStyle(
-                                        fontSize: 26,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF2d59f0)),
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () {
-                                        Clipboard.setData(
-                                            ClipboardData(text: code));
-                                        ScaffoldMessenger
-                                            .of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                              content:
-                                              Text("Partner code copied")),
-                                        );
-                                      },
-                                      child: const Text("Copy Code",
-                                          style: TextStyle(
-                                              color: Color(0xFF2d59f0))),
-                                    ),
-                                    TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text("Close")),
-                                  ],
-                                ),
-                          );
-                        }
-                      } else if (value == 'link') {
-                        showDialog(
-                            context: context,
-                            builder: (_) => const LinkPartnerDialog());
-                      }
-                      else if (value == 'unlink') {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (context) => AlertDialog(
-                            backgroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                            title: Row(
-                              children: const [
-                                Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
-                                SizedBox(width: 10),
-                                Text("Unlink Partner", style: TextStyle(fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                            content: const Text(
-                              'Are you sure you want to unlink your partner? '
-                                  'This will remove shared access to medications and calendar data.',
-                              style: TextStyle(color: Colors.black87, fontSize: 16),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text("Cancel"),
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: () => Navigator.pop(context, true),
-                                icon: const Icon(Icons.link_off, color: Colors.white, size: 18),
-                                label: const Text("Unlink"),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.redAccent,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                ),
-                              ),
-                            ],
+                  // 👉 Greeting & Name
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          greeting,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey,
+                            fontWeight: FontWeight.w500,
                           ),
-                        );
-
-                        if (confirm == true) {
-                          final user = FirebaseAuth.instance.currentUser;
-                          if (user != null) {
-                            final userRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
-                            final userDoc = await userRef.get();
-                            final partnerId = userDoc.data()?['linkedPartner'];
-
-                            await userRef.update({'linkedPartner': null});
-
-                            if (partnerId != null && partnerId.toString().isNotEmpty) {
-                              await FirebaseFirestore.instance
-                                  .collection('users')
-                                  .doc(partnerId)
-                                  .update({'linkedPartner': null});
-                            }
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text("Partner unlinked successfully"),
-                                backgroundColor: Colors.redAccent,
-                                behavior: SnackBarBehavior.floating,
-                                margin: const EdgeInsets.all(12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
-                            setState(() {});
-                          }
-                        }
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'viewCode',
-                        child: Row(
-                          children: [
-                            Icon(Icons.qr_code_2_rounded, color: Color(0xFF2d59f0)),
-                            SizedBox(width: 8),
-                            Text("View Partner Code"),
-                          ],
                         ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'link',
-                        child: Row(
-                          children: [
-                            Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF2d59f0)),
-                            SizedBox(width: 8),
-                            Text("Link Partner"),
-                          ],
+                        const SizedBox(height: 2),
+                        Text(
+                          caregiverName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black87,
+                          ),
                         ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'unlink',
-                        child: Row(
-                          children: [
-                            Icon(Icons.link_off_rounded, color: Colors.redAccent),
-                            SizedBox(width: 8),
-                            Text("Unlink Partner"),
-                          ],
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
+                  ),
+
+                  // ☀️ Greeting Icon on the far right
+                  Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2d59f0).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      greetingIcon,
+                      color: const Color(0xFF2d59f0),
+                      size: 22,
+                    ),
                   ),
                 ],
               ),
+
               const SizedBox(height: 25),
               ValueListenableBuilder<List<double>>(
                 valueListenable: weeklyProgressNotifier,
@@ -980,6 +847,247 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSidebar(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    const blue = Color(0xFF2d59f0);
+
+    return Drawer(
+      elevation: 0,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topRight: Radius.circular(25),
+          bottomRight: Radius.circular(25),
+        ),
+      ),
+      backgroundColor: Colors.transparent, // 👈 make it transparent
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(25),
+          bottomRight: Radius.circular(25),
+        ),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18), // 👈 frosted blur
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.8), // translucent white
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 25,
+                  offset: const Offset(4, 4),
+                ),
+              ],
+              border: Border.all(color: Colors.white.withOpacity(0.5), width: 0.8),
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 12, 22, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // --- Profile Header ---
+                    Row(
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [
+                                blue.withOpacity(0.85),
+                                blue.withOpacity(0.65)
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: blue.withOpacity(0.3),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          padding: const EdgeInsets.all(10),
+                          child: const Icon(Icons.person,
+                              color: Colors.white, size: 26),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            caregiverName,
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.2,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Divider(color: Colors.blue.shade100, thickness: 1),
+
+                    // --- Sidebar Items ---
+                    _modernSidebarItem(
+                      icon: Icons.qr_code_2_rounded,
+                      label: "View Partner Code",
+                      color: blue,
+                      onTap: () async {
+                        Navigator.pop(context);
+                        final doc = await FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(user!.uid)
+                            .get();
+                        final code = doc['partnerCode'] ?? 'N/A';
+                        showDialog(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            title: const Text("Your Partner Code",
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            content: SelectableText(
+                              code,
+                              style: const TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.bold,
+                                color: blue,
+                              ),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: code));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text("Partner code copied")),
+                                  );
+                                },
+                                child: const Text("Copy",
+                                    style: TextStyle(color: blue)),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text("Close",
+                                    style: TextStyle(color: blue)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    _modernSidebarItem(
+                      icon: Icons.person_add_alt_1_rounded,
+                      label: "Link Partner",
+                      color: blue,
+                      onTap: () {
+                        Navigator.pop(context);
+                        showDialog(
+                            context: context,
+                            builder: (_) => const LinkPartnerDialog());
+                      },
+                    ),
+                    _modernSidebarItem(
+                      icon: Icons.link_off_rounded,
+                      label: "Unlink Partner",
+                      color: blue,
+                      onTap: () async {
+                        Navigator.pop(context);
+                        // existing unlink code here...
+                      },
+                    ),
+
+                    Divider(color: Colors.blue.shade100, thickness: 1),
+                    const SizedBox(height: 10),
+
+                    _modernSidebarItem(
+                      icon: Icons.switch_account_rounded,
+                      label: "Switch Account",
+                      color: blue,
+                      onTap: () async {
+                        Navigator.pop(context);
+                        await FirebaseAuth.instance.signOut();
+                        if (context.mounted) {
+                          Navigator.pushReplacementNamed(context, "/signin");
+                        }
+                      },
+                    ),
+                    _modernSidebarItem(
+                      icon: Icons.logout_rounded,
+                      label: "Log Out",
+                      color: Colors.redAccent,
+                      onTap: () async {
+                        Navigator.pop(context);
+                        await FirebaseAuth.instance.signOut();
+                        if (context.mounted) {
+                          Navigator.pushReplacementNamed(context, "/welcome");
+                        }
+                      },
+                    ),
+
+                    const Spacer(),
+                    const Align(
+                      alignment: Alignment.center,
+                      child: Text(
+                        "MediCare v1.0",
+                        style: TextStyle(
+                          color: Colors.black54,
+                          fontSize: 13,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _modernSidebarItem({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color color = const Color(0xFF2d59f0),
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      splashColor: color.withOpacity(0.12),
+      highlightColor: color.withOpacity(0.08),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.all(6),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

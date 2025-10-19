@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:medi_care/widgets/back_button_overlay.dart';
 
+
 class AddMedicationScreen extends StatefulWidget {
   final DateTime? initialDate;
   const AddMedicationScreen({super.key, this.initialDate});
@@ -45,11 +46,13 @@ class _AddMedicationScreenState extends State<AddMedicationScreen> {
   // ---------- TIME PICKER ----------
   Future<void> _pickTime() async {
     TimeOfDay temp = _selectedTime ?? TimeOfDay.now();
+
     await showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+      ),
       builder: (ctx) {
         return SafeArea(
           child: SizedBox(
@@ -76,13 +79,22 @@ class _AddMedicationScreenState extends State<AddMedicationScreen> {
                     data: const CupertinoThemeData(
                       textTheme: CupertinoTextThemeData(
                         dateTimePickerTextStyle: TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w500),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black87,
+                        ),
                       ),
                     ),
                     child: CupertinoDatePicker(
                       mode: CupertinoDatePickerMode.time,
                       use24hFormat: false,
-                      initialDateTime: DateTime.now(),
+                      initialDateTime: DateTime(
+                        DateTime.now().year,
+                        DateTime.now().month,
+                        DateTime.now().day,
+                        temp.hour,
+                        temp.minute,
+                      ),
                       onDateTimeChanged: (v) {
                         temp = TimeOfDay(hour: v.hour, minute: v.minute);
                       },
@@ -90,10 +102,25 @@ class _AddMedicationScreenState extends State<AddMedicationScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                _doneButton(() {
-                  setState(() => _selectedTime = temp);
-                  Navigator.pop(context);
-                }),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2d59f0),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(140, 48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    elevation: 4,
+                  ),
+                  onPressed: () {
+                    setState(() => _selectedTime = temp);
+                    Navigator.pop(context);
+                  },
+                  child: const Text(
+                    "Done",
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                  ),
+                ),
                 const SizedBox(height: 16),
               ],
             ),
@@ -115,97 +142,186 @@ class _AddMedicationScreenState extends State<AddMedicationScreen> {
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+      ),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            return SizedBox(
-              height: 340,
-              child: Column(
-                children: [
-                  const SizedBox(height: 12),
-                  Container(
-                    width: 50,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(10),
+            return SafeArea(
+              child: SizedBox(
+                height: 340,
+                child: Column(
+                  children: [
+                    const SizedBox(height: 12),
+                    Container(
+                      width: 50,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    "Select Dosage",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Quantity picker
-                        Expanded(
-                          child: CupertinoPicker(
-                            magnification: 1.2,
-                            itemExtent: 42,
-                            onSelectedItemChanged: (i) =>
-                                setModalState(() => quantity = i + 1),
-                            selectionOverlay: _blueOverlay(),
-                            children: List.generate(
-                                10,
-                                    (i) => Center(
-                                    child: Text("${i + 1}",
-                                        style: const TextStyle(fontSize: 18)))),
-                          ),
-                        ),
-                        // Unit picker
-                        Expanded(
-                          child: CupertinoPicker(
-                            magnification: 1.2,
-                            itemExtent: 42,
-                            onSelectedItemChanged: (i) =>
-                                setModalState(() => unit = units[i]),
-                            selectionOverlay: _blueOverlay(),
-                            children: units
-                                .map((u) => Center(
-                                child: Text(u,
-                                    style:
-                                    const TextStyle(fontSize: 18))))
-                                .toList(),
-                          ),
-                        ),
-                        // Strength picker (only for tablets/capsules)
-                        if (unit.contains("tablet") || unit.contains("capsule"))
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Select Dosage",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // --- unified smooth wheel area ---
+                    Expanded(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Quantity
                           Expanded(
                             child: CupertinoPicker(
-                              magnification: 1.2,
+                              magnification: 1.3,
+                              squeeze: 1.1,
+                              diameterRatio: 1.2,
                               itemExtent: 42,
+                              scrollController:
+                              FixedExtentScrollController(initialItem: 0),
+                              selectionOverlay: Container(
+                                decoration: BoxDecoration(
+                                  border: Border.symmetric(
+                                    horizontal: BorderSide(
+                                      color: Colors.blue.shade300.withOpacity(0.8),
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
+                              ),
                               onSelectedItemChanged: (i) =>
-                                  setModalState(() => strength = strengths[i]),
-                              selectionOverlay: _blueOverlay(),
-                              children: strengths
-                                  .map((mg) => Center(
-                                  child: Text("$mg mg each",
-                                      style: const TextStyle(
-                                          fontSize: 18))))
+                                  setModalState(() => quantity = i + 1),
+                              children: List.generate(
+                                10,
+                                    (i) => Center(
+                                  child: Text(
+                                    "${i + 1}",
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Unit
+                          Expanded(
+                            child: CupertinoPicker(
+                              magnification: 1.3,
+                              squeeze: 1.1,
+                              diameterRatio: 1.2,
+                              itemExtent: 42,
+                              selectionOverlay: Container(
+                                decoration: BoxDecoration(
+                                  border: Border.symmetric(
+                                    horizontal: BorderSide(
+                                      color: Colors.blue.shade300.withOpacity(0.8),
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              onSelectedItemChanged: (i) =>
+                                  setModalState(() => unit = units[i]),
+                              children: units
+                                  .map(
+                                    (u) => Center(
+                                  child: Text(
+                                    u,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              )
                                   .toList(),
                             ),
                           ),
-                      ],
+
+                          // Strength
+                          if (unit.contains("tablet") || unit.contains("capsule"))
+                            Expanded(
+                              child: CupertinoPicker(
+                                magnification: 1.3,
+                                squeeze: 1.1,
+                                diameterRatio: 1.2,
+                                itemExtent: 42,
+                                selectionOverlay: Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.symmetric(
+                                      horizontal: BorderSide(
+                                        color:
+                                        Colors.blue.shade300.withOpacity(0.8),
+                                        width: 2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                onSelectedItemChanged: (i) =>
+                                    setModalState(() => strength = strengths[i]),
+                                children: strengths
+                                    .map(
+                                      (mg) => Center(
+                                    child: Text(
+                                      "$mg mg each",
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                    .toList(),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  _doneButton(() {
-                    String dosage;
-                    if (unit.contains("tablet") || unit.contains("capsule")) {
-                      dosage = "$quantity $unit ($strength mg each)";
-                    } else {
-                      dosage = "$quantity $unit";
-                    }
-                    setState(() => _dosageCtrl.text = dosage);
-                    Navigator.pop(context);
-                  }),
-                  const SizedBox(height: 16),
-                ],
+                    const SizedBox(height: 10),
+
+                    // Done button (same style as time picker)
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2d59f0),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(140, 48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        elevation: 4,
+                      ),
+                      onPressed: () {
+                        String dosage;
+                        if (unit.contains("tablet") || unit.contains("capsule")) {
+                          dosage = "$quantity $unit ($strength mg each)";
+                        } else {
+                          dosage = "$quantity $unit";
+                        }
+                        setState(() => _dosageCtrl.text = dosage);
+                        Navigator.pop(context);
+                      },
+                      child: const Text(
+                        "Done",
+                        style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
             );
           },
@@ -254,7 +370,7 @@ class _AddMedicationScreenState extends State<AddMedicationScreen> {
                       FixedExtentScrollController(initialItem: selected),
                       onSelectedItemChanged: (i) =>
                           setModalState(() => selected = i),
-                      selectionOverlay: _blueOverlay(),
+                      selectionOverlay: _greyOverlay(),
                       children: repeats
                           .map((r) => Center(
                           child: Text(r,
@@ -277,13 +393,23 @@ class _AddMedicationScreenState extends State<AddMedicationScreen> {
   }
 
   // ---------- COMMON OVERLAY ----------
-  Widget _blueOverlay() {
+  Widget _greyOverlay() {
     return Container(
       decoration: BoxDecoration(
+        color: Colors.grey.withOpacity(0.2),
         border: Border.symmetric(
-          horizontal:
-          BorderSide(color: Colors.blue.shade300.withOpacity(0.8), width: 2),
+          horizontal: BorderSide(
+            color: Colors.grey.withOpacity(0.4),
+            width: 0.5,
+          ),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
     );
   }
@@ -392,18 +518,20 @@ class _AddMedicationScreenState extends State<AddMedicationScreen> {
                             color: Color(0xFF2d59f0),
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            prettyDate,
-                            style: const TextStyle(
-                              color: Color(0xFF2d59f0),
-                              fontWeight: FontWeight.w600,
+                        GestureDetector(
+                          onTap: () => Navigator.pushNamed(context, '/schedule'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              prettyDate,
+                              style: const TextStyle(
+                                color: Color(0xFF2d59f0),
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ),
