@@ -60,8 +60,12 @@ dev_dependencies:
 
   flutter_lints: ^3.0.0
 
+  flutter_launcher_icons: ^0.14.1
+
 flutter:
   uses-material-design: true
+
+  generate: true
 
   assets:
     - assets/animations/
@@ -96,3 +100,10 @@ flutter_native_splash:
   fullscreen: true
   android_gravity: center
   ios_content_mode: scaleAspectFit
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logos/app_logo.jpg"
+  min_sdk_android: 21
+
