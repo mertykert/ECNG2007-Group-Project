@@ -1,3 +1,4 @@
+// lib/screens/profile_selection_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -18,9 +19,10 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen>
     final user = FirebaseAuth.instance.currentUser;
 
     if (user != null) {
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'role': role,
-      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+        {'role': role},
+        SetOptions(merge: true),
+      );
     }
 
     if (!mounted) return;
@@ -47,20 +49,6 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen>
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const SizedBox(height: 50),
-
-                        // 🌤️ Optional illustration (replace asset)
-                        Container(
-                          width: 160,
-                          height: 160,
-                          decoration: const BoxDecoration(
-                            image: DecorationImage(
-                              image: AssetImage("assets/images/medical_wave.png"),
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
-
                         const SizedBox(height: 20),
                         const Text(
                           "Select Your Profile",
@@ -82,8 +70,12 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen>
                         ),
 
                         const SizedBox(height: 40),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+
+                        // FIX: Row -> Wrap to avoid horizontal overflow on 360dp screens.
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 24,
+                          runSpacing: 24,
                           children: [
                             _buildProfileCard(
                               icon: Icons.volunteer_activism_rounded,
@@ -92,7 +84,6 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen>
                               color: const Color(0xFF2D59F0),
                               onTap: () => _setRole('caregiver'),
                             ),
-                            const SizedBox(width: 24),
                             _buildProfileCard(
                               icon: Icons.favorite_rounded,
                               label: "Care Receiver",
@@ -102,6 +93,7 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen>
                             ),
                           ],
                         ),
+
                         const SizedBox(height: 60),
                       ],
                     ),
@@ -121,24 +113,25 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen>
     required Color color,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-        width: 150,
-        height: 200,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      width: 150, // Intentional fixed width; Wrap will move to next line if needed.
+      height: 200,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material( // Needed for InkWell ripple
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(22),
         child: InkWell(
           borderRadius: BorderRadius.circular(22),
           splashColor: color.withOpacity(0.1),
