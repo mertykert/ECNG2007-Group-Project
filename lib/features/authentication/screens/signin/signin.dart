@@ -372,7 +372,12 @@ class _SignInScreenState extends State<SignInScreen> {
               ],
             ),
           ),
-          const BackButtonOverlay(),
+          Positioned(
+            left: 16,
+            // push it below the status bar + your extra offset
+            top: MediaQuery.of(context).padding.top + 25, // <- tweak 56–96 to taste
+            child: const BackButtonOverlay(),
+          ),
         ],
       ),
     );
