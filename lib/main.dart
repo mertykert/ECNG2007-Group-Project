@@ -47,11 +47,8 @@ void callbackDispatcher() {
 
       if (taskName == 'resyncReminders') {
         final uid = (inputData?['uid'] as String?) ?? '';
-        final box = Hive.box('scheduled_reminders');
-        for (final entry in box.toMap().entries) {
-          final medId = entry.key;
-          final data = Map<String, dynamic>.from(entry.value);
-          await MedReminderScheduler.scheduleForMed(uid: uid, medId: medId, medData: data);
+        if (uid.isNotEmpty) {
+          await NotificationService.resetFromFirestore(uid); // <— new
         }
         print("🔁 Background resync of reminders completed");
         return true;
@@ -150,9 +147,7 @@ Future<void> main() async {
     FirebaseAuth.instance.authStateChanges().listen((user) async {
       if (user != null) {
         // NotificationService.init() already ran in main; no race now.
-        await NotificationService.purgeAndReseed(user.uid);
-        await NotificationService.cleanUserPending(user.uid);
-        await NotificationService.dumpPending();
+        await NotificationService.resetFromFirestore(user.uid);
         await _registerBackgroundFor(user.uid);
       } else {
         await Workmanager().cancelAll();

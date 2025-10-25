@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:hive/hive.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -129,6 +130,69 @@ class NotificationService {
       }
     } catch (e) {
       print('⚠️ scrubByMed error: $e');
+    }
+  }
+
+  static Future<void> resetFromFirestore(String uid) async {
+    try {
+      // Nuke everything first so we never double-schedule
+      await cancelAll();
+
+      final medsSnap = await FirebaseFirestore.instance
+          .collection('users').doc(uid)
+          .collection('medications')
+          .get();
+
+      // Rebuild Hive backup ONLY from current Firestore docs
+      final box = Hive.box('scheduled_reminders');
+      await box.clear();
+
+      int scheduled = 0, skipped = 0;
+      for (final doc in medsSnap.docs) {
+        final d = doc.data();
+        final name   = (d['name'] ?? '').toString().trim();
+        final time   = (d['time'] ?? '').toString().trim();
+        final time24 = (d['time24'] ?? '').toString().trim();
+        final repeat = (d['repeat'] ?? 'Once').toString().trim();
+        final date   = (d['date'] ?? '').toString().trim();
+        final expiry = (d['expiryDate'] ?? '').toString().trim();
+
+        if (name.isEmpty || (time.isEmpty && time24.isEmpty)) {
+          skipped++; continue;
+        }
+
+        await sched.MedReminderScheduler.scheduleForMed(
+          uid: uid,
+          medId: doc.id,
+          medData: {
+            'name': name,
+            'time': time,
+            'time24': time24,
+            'repeat': repeat,
+            'date': date,
+            'expiryDate': expiry,
+          },
+        );
+
+        await box.put(doc.id, {
+          'uid': uid,
+          'name': name,
+          'time': time,
+          'time24': time24,
+          'repeat': repeat,
+          'date': date,
+          'expiryDate': expiry,
+        });
+
+        scheduled++;
+      }
+
+      // Kill any OS-pending notifications that reference meds you no longer have
+      await cleanUserPending(uid);
+      await dumpPending();
+      print("✅ resetFromFirestore: scheduled=$scheduled, skipped=$skipped for $uid");
+    } catch (e, st) {
+      print("❌ resetFromFirestore error: $e\n$st");
     }
   }
 
