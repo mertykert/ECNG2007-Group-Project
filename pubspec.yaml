@@ -19,6 +19,19 @@ dependencies:
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.6.0
 
+  flutter_timezone: ^5.0.0
+
+  permission_handler: ^11.3.1
+
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+
+  workmanager:
+    git:
+      url: https://github.com/fluttercommunity/flutter_workmanager.git
+      ref: main
+      path: workmanager
+
   lottie: ^3.1.2
 
   shared_preferences: ^2.3.2
@@ -48,6 +61,8 @@ dependencies:
   # State Management
   get: ^4.6.5
   get_storage: ^2.1.1
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
 
   # Product Specific
   # (Add any additional runtime packages here)
