@@ -10,9 +10,8 @@ import 'package:medi_care/services/med_reminder_scheduler.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
-
-import 'firebase_options.dart';
 import 'services/notification_service.dart';
+import 'firebase_options.dart';
 import 'services/missed_dose_service.dart';
 import 'services/refill_service.dart';
 
@@ -38,11 +37,13 @@ void callbackDispatcher() {
     DartPluginRegistrant.ensureInitialized();
 
     try {
-      // ✅ Always initialize core deps in background isolate before any work
+      // Always initialize core deps in background isolate before any work
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-      await NotificationService.init();
+
       await Hive.initFlutter();
       await Hive.openBox('scheduled_reminders');
+
+      await NotificationService.init();
 
       if (taskName == 'resyncReminders') {
         final uid = (inputData?['uid'] as String?) ?? '';
@@ -109,12 +110,14 @@ Future<void> main() async {
   try {
     // 1) Core SDKs
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-    await NotificationService.init();
+
 
     // 2) Local stores (before any Hive.box)
     await Hive.initFlutter();
     await Hive.openBox('meds');
     await Hive.openBox('scheduled_reminders');
+
+    await NotificationService.init();
 
     // 3) Permissions & background
     await checkPermissions();
@@ -127,6 +130,7 @@ Future<void> main() async {
     );
 
     // 5) Restore scheduled reminders from local Hive backup
+    //    (SAFE now because NotificationService.init() is done)
     final reminderBox = Hive.box('scheduled_reminders');
     for (final entry in reminderBox.toMap().entries) {
       final medId = entry.key;
@@ -140,13 +144,12 @@ Future<void> main() async {
     if (kDebugMode) {
       print("🔁 Restored ${reminderBox.length} medication reminders on startup");
       await NotificationService.dumpPending();
-      // Optional debug sanity check (uncomment if needed)
-      // await NotificationService.sanityPing(title: '🔔 Reminder test', body: 'Arrives in ~60s.');
     }
 
     // 6) Auth-driven background tasks (single listener)
     FirebaseAuth.instance.authStateChanges().listen((user) async {
       if (user != null) {
+        // NotificationService.init() already ran in main; no race now.
         await NotificationService.purgeAndReseed(user.uid);
         await NotificationService.cleanUserPending(user.uid);
         await NotificationService.dumpPending();

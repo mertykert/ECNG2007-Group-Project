@@ -7,23 +7,37 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
-
 import 'med_reminder_scheduler.dart' as sched;
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
-  static const _channelId = 'med_channel';
-  static const _channelName = 'Medication Alerts';
-  static const _channelDesc = 'Reminders & missed-dose alerts';
+  // CHANGE THESE 3 LINES (new id to escape old muted/low channel)
+  static const _channelId   = 'med_alerts_v2';
+  static const _channelName = 'MediCare Reminders';
+  static const _channelDesc = 'Medication reminders and expiry warnings';
 
   // Fallback timers to guarantee a toast if OS doesn’t fire.
   static final Map<int, Timer> _fallbacks = {};
+  static bool _tzReady = false;
+
+  static Future<void> _ensureTz() async {            // <— add this
+    if (_tzReady) return;
+    tz.initializeTimeZones();
+    try {
+      final name = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(name as String));
+    } catch (_) {
+      tz.setLocalLocation(tz.getLocation('UTC'));
+    }
+    _tzReady = true;
+  }
 
   static Future<void> init() async {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher'); // must exist
     const settings = InitializationSettings(android: androidInit);
     await _plugin.initialize(settings);
+    await _ensureTz();
 
     tz.initializeTimeZones();
     try {
@@ -48,7 +62,10 @@ class NotificationService {
         _channelId,
         _channelName,
         description: _channelDesc,
-        importance: Importance.max,
+        importance: Importance.max,    // ensure max
+        playSound: true,
+        enableVibration: true,
+        showBadge: true,
       ),
     );
   }
@@ -60,6 +77,15 @@ class NotificationService {
       channelDescription: _channelDesc,
       importance: Importance.max,
       priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      category: AndroidNotificationCategory.reminder,
+      visibility: NotificationVisibility.public,
+    ),
+    iOS: DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
     ),
   );
 
@@ -200,6 +226,7 @@ class NotificationService {
         int? id,
         String? payload,
       }) async {
+    await _ensureTz();
     final now = tz.TZDateTime.now(tz.local);
     tz.TZDateTime sched = tz.TZDateTime.from(when, tz.local);
 
@@ -247,6 +274,7 @@ class NotificationService {
         int? id,
         String? payload,
       }) async {
+    await _ensureTz();
     final _id = id ?? _fnv32('once|${when.millisecondsSinceEpoch}|$title');
     await _plugin.cancel(_id);
     await _plugin.zonedSchedule(
@@ -260,6 +288,7 @@ class NotificationService {
       matchDateTimeComponents: null,
       payload: payload,
     );
+    _armFallback(_id, when, title, body);
     return _id;
   }
 
@@ -270,6 +299,7 @@ class NotificationService {
         int? id,
         String? payload,
       }) async {
+    await _ensureTz();
     final _id = id ?? _fnv32('daily|${when.hour}:${when.minute}|$title');
     await _plugin.cancel(_id);
     await _plugin.zonedSchedule(
@@ -283,6 +313,7 @@ class NotificationService {
       matchDateTimeComponents: DateTimeComponents.time,
       payload: payload,
     );
+    _armFallback(_id, when, title, body);
     return _id;
   }
 
@@ -293,6 +324,7 @@ class NotificationService {
         int? id,
         String? payload,
       }) async {
+    await _ensureTz();
     final _id = id ?? _fnv32('weekly|${when.weekday}@${when.hour}:${when.minute}|$title');
     await _plugin.cancel(_id);
     await _plugin.zonedSchedule(
@@ -306,6 +338,7 @@ class NotificationService {
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
       payload: payload,
     );
+    _armFallback(_id, when, title, body);
     return _id;
   }
 

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../services/notification_service.dart';
+
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
 
@@ -193,6 +195,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             textColor: Colors.black,
                             iconColor: Colors.black,
                             onTap: () async {
+                              await NotificationService.showNow('🔔 Test alert', 'If you see this, the channel works.');
                               final prefs = await SharedPreferences.getInstance();
                               final user = FirebaseAuth.instance.currentUser;
                               final wasLoggedInOnce = prefs.getBool('isLoggedInOnce') ?? false;
