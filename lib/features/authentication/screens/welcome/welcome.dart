@@ -195,7 +195,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             textColor: Colors.black,
                             iconColor: Colors.black,
                             onTap: () async {
-                              await NotificationService.showNow('🔔 Test alert', 'If you see this, the channel works.');
                               final prefs = await SharedPreferences.getInstance();
                               final user = FirebaseAuth.instance.currentUser;
                               final wasLoggedInOnce = prefs.getBool('isLoggedInOnce') ?? false;
