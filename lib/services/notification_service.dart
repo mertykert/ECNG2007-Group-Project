@@ -1,6 +1,7 @@
-// lib/services/notification_service.dart
 import 'dart:async';
 import 'dart:io';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -11,36 +12,89 @@ import 'package:timezone/timezone.dart' as tz;
 import 'med_reminder_scheduler.dart' as sched;
 
 class NotificationService {
-  static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _plugin =
+  FlutterLocalNotificationsPlugin();
 
-  // CHANGE THESE 3 LINES (new id to escape old muted/low channel)
-  static const _channelId   = 'med_alerts_v2';
+  static const _channelId = 'med_alerts_v2';
   static const _channelName = 'MediCare Reminders';
   static const _channelDesc = 'Medication reminders and expiry warnings';
 
-  // Fallback timers to guarantee a toast if OS doesn’t fire.
   static final Map<int, Timer> _fallbacks = {};
   static bool _tzReady = false;
 
-  static Future<void> _ensureTz() async {            // <— add this
+  /// Ensure timezone initialized
+  static Future<void> _ensureTz() async {
     if (_tzReady) return;
     tz.initializeTimeZones();
+
     try {
-      final name = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(name as String));
-    } catch (_) {
+      final dynamic tzResult = await FlutterTimezone.getLocalTimezone();
+      String currentZone;
+
+      if (tzResult is String) {
+        currentZone = tzResult;
+      } else if (tzResult.toString().contains('(')) {
+        // Extract from: TimezoneInfo(America/Port_of_Spain, (locale: en_GB, name: Atlantic Standard Time))
+        final match = RegExp(r'\(([^,]+),').firstMatch(tzResult.toString());
+        currentZone = match != null ? match.group(1)! : 'UTC';
+      } else if (tzResult is Map && tzResult['name'] != null) {
+        currentZone = tzResult['name'].toString();
+      } else {
+        currentZone = 'UTC';
+      }
+
+      tz.setLocalLocation(tz.getLocation(currentZone));
+      print('🌍 Timezone initialized: $currentZone');
+    } catch (e) {
+      print('⚠️ Timezone init failed, defaulting to UTC: $e');
       tz.setLocalLocation(tz.getLocation('UTC'));
     }
+
     _tzReady = true;
   }
 
+  Future<void> openBatteryOptimizationSettings() async {
+    if (!Platform.isAndroid) return;
+    final intent = AndroidIntent(
+      action: 'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+      data: 'package:com.example.medi_care', // ← your actual package
+      flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+    );
+    await intent.launch();
+  }
+
+  /// Ask Android 13+ to open the Exact Alarm permission page
+  static Future<void> _requestExactAlarmPermission() async {
+    if (!Platform.isAndroid) return;
+
+    // Android 13+ only
+    if (await Permission.scheduleExactAlarm.isGranted) {
+      print('⏰ Exact alarm already granted');
+      return;
+    }
+
+    try {
+      const packageName = 'com.example.medi_care'; // ⚠️ replace with your real ID from AndroidManifest
+      final intent = AndroidIntent(
+        action: 'android.settings.REQUEST_SCHEDULE_EXACT_ALARM',
+        package: packageName,
+        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+      );
+      await intent.launch();
+      print('⚙️ Opened system settings for exact alarms.');
+    } catch (e) {
+      print('❌ Could not open exact alarm settings: $e');
+    }
+  }
+
+  /// Initialize notification system
   static Future<void> init() async {
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher'); // must exist
+    const androidInit =
+    AndroidInitializationSettings('@mipmap/ic_launcher'); // must exist
     const settings = InitializationSettings(android: androidInit);
     await _plugin.initialize(settings);
     await _ensureTz();
 
-    tz.initializeTimeZones();
     try {
       final tzRaw = await FlutterTimezone.getLocalTimezone();
       final m = RegExp(r'([A-Za-z]+\/[A-Za-z_]+)').firstMatch(tzRaw.toString());
@@ -54,22 +108,24 @@ class NotificationService {
 
     if (Platform.isAndroid) {
       await Permission.notification.request();
-      await Permission.scheduleExactAlarm.request();
+      await _requestExactAlarmPermission(); // ✅ this now runs correctly
     }
 
-    final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(
       const AndroidNotificationChannel(
         _channelId,
         _channelName,
         description: _channelDesc,
-        importance: Importance.max,    // ensure max
+        importance: Importance.max,
         playSound: true,
         enableVibration: true,
         showBadge: true,
       ),
     );
   }
+
 
   static const NotificationDetails _details = NotificationDetails(
     android: AndroidNotificationDetails(
@@ -288,48 +344,72 @@ class NotificationService {
       String body, {
         DateTimeComponents? repeat,
         int? id,
-        String? payload,
+        String? payload, // NEW — allows custom data for taps/callbacks
       }) async {
-    await _ensureTz();
-    final now = tz.TZDateTime.now(tz.local);
-    tz.TZDateTime sched = tz.TZDateTime.from(when, tz.local);
+    int notifId = id ?? DateTime.now().microsecondsSinceEpoch.remainder(100000);
 
-    if (repeat == null) {
-      if (!sched.isAfter(now)) sched = now.add(const Duration(minutes: 1));
-      return scheduleOnce(sched.toLocal(), title, body, id: id, payload: payload);
+    try {
+      // 🕓 Ensure timezone initialized before scheduling
+      tz.initializeTimeZones();
+
+      final dynamic tzResult = await FlutterTimezone.getLocalTimezone();
+
+      String currentTimeZone;
+
+// Handle both old and new FlutterTimezone return types
+      if (tzResult is String) {
+        currentTimeZone = tzResult;
+      } else if (tzResult is Map && tzResult['name'] != null) {
+        currentTimeZone = tzResult['name'].toString();
+      } else if (tzResult.toString().contains('America/')) {
+        // Extract from "TimezoneInfo(America/Port_of_Spain, ...)"
+        final match = RegExp(r'\(([^,]+),').firstMatch(tzResult.toString());
+        currentTimeZone = match != null ? match.group(1)! : 'UTC';
+      } else {
+        currentTimeZone = 'UTC';
+      }
+
+      tz.setLocalLocation(tz.getLocation(currentTimeZone));
+      print("🌍 Using timezone: $currentTimeZone");
+
+      final now = tz.TZDateTime.now(tz.local);
+      tz.TZDateTime scheduleTime = tz.TZDateTime.from(when, tz.local);
+
+      // Ensure future time
+      if (!scheduleTime.isAfter(now)) {
+        scheduleTime = scheduleTime.add(const Duration(days: 1));
+      }
+
+      DateTimeComponents? match;
+      if (repeat == DateTimeComponents.time) {
+        match = DateTimeComponents.time; // daily
+      } else if (repeat == DateTimeComponents.dayOfWeekAndTime) {
+        match = DateTimeComponents.dayOfWeekAndTime; // weekly
+      }
+
+      print("⏰ Scheduling '$title' for ${scheduleTime.toLocal()} (repeat=$match)");
+
+      await _plugin.zonedSchedule(
+        notifId,
+        title,
+        body,
+        scheduleTime,
+        _details,
+        payload: payload, //  Pass along the custom payload
+        uiLocalNotificationDateInterpretation:
+        UILocalNotificationDateInterpretation.absoluteTime,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: match,
+      );
+
+      print("✅ Scheduled notification for '$title' at ${scheduleTime.toLocal()} (id=$notifId)");
+    } catch (e, st) {
+      print("❌ scheduleAt() error: $e\n$st");
     }
 
-    if (repeat == DateTimeComponents.time) {
-      final todayAt = tz.TZDateTime(tz.local, now.year, now.month, now.day, sched.hour, sched.minute, sched.second);
-      final next = todayAt.isAfter(now) ? todayAt : todayAt.add(const Duration(days: 1));
-      return scheduleDaily(next.toLocal(), title, body, id: id, payload: payload);
-    }
-
-    if (repeat == DateTimeComponents.dayOfWeekAndTime) {
-      final base = tz.TZDateTime(tz.local, now.year, now.month, now.day, sched.hour, sched.minute, sched.second);
-      final diff = (sched.weekday - now.weekday) % 7;
-      var next = base.add(Duration(days: diff));
-      if (!next.isAfter(now)) next = next.add(const Duration(days: 7));
-      return scheduleWeekly(next.toLocal(), title, body, id: id, payload: payload);
-    }
-
-    if (!sched.isAfter(now)) sched = now.add(const Duration(minutes: 1));
-    return scheduleOnce(sched.toLocal(), title, body, id: id, payload: payload);
+    return notifId;
   }
 
-  // ---------- Schedulers (with in-app fallback timers) ----------
-  static void _armFallback(int id, DateTime when, String title, String body) {
-    // Only arm if within 30 minutes (avoid super long timers).
-    final diff = when.difference(DateTime.now());
-    if (diff.inSeconds <= 0 || diff.inMinutes > 30) return;
-
-    _fallbacks[id]?.cancel();
-    _fallbacks[id] = Timer(diff, () async {
-      print("⚡ Fallback fired → '$title'");
-      await _plugin.show(id, title, body, _details);
-      _fallbacks.remove(id);
-    });
-  }
 
   static Future<int> scheduleOnce(
       DateTime when,
@@ -352,7 +432,6 @@ class NotificationService {
       matchDateTimeComponents: null,
       payload: payload,
     );
-    _armFallback(_id, when, title, body);
     return _id;
   }
 
@@ -377,7 +456,6 @@ class NotificationService {
       matchDateTimeComponents: DateTimeComponents.time,
       payload: payload,
     );
-    _armFallback(_id, when, title, body);
     return _id;
   }
 
@@ -402,7 +480,6 @@ class NotificationService {
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
       payload: payload,
     );
-    _armFallback(_id, when, title, body);
     return _id;
   }
 

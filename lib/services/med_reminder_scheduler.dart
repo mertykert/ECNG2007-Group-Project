@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
 import 'package:hive/hive.dart';
-
 import 'notification_service.dart';
+
 
 class MedReminderScheduler {
   static final _db = FirebaseFirestore.instance;
@@ -238,39 +238,49 @@ class MedReminderScheduler {
   /// Full cancel used on DELETE (shows a “deleted” banner).
   static Future<void> cancelForMed(String uid, String medId) async {
     try {
-      final docRef = _db.collection('users').doc(uid).collection('medications').doc(medId);
-      final snap = await docRef.get();
-      final data = snap.data();
-      final name = (data?['name'] ?? 'Medication').toString();
+      // 1️⃣ Cancel both reminder + expiry notifications using stable IDs
+      final reminderId = NotificationService.stableIdFor(uid, medId, kind: 'reminder');
+      final expiryId   = NotificationService.stableIdFor(uid, medId, kind: 'expiry');
+      await NotificationService.cancel(reminderId);
+      await NotificationService.cancel(expiryId);
 
-      // First remove whatever IDs are recorded
-      final ids = (data?['notificationIds'] as Map?)?.cast<String, dynamic>();
-      if (ids != null) {
-        for (final v in ids.values) {
-          if (v is int)       await NotificationService.cancel(v);
-          else if (v is num)  await NotificationService.cancel(v.toInt());
+      // 2️⃣ Double-check for any older random IDs saved in Firestore
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('medications')
+          .doc(medId)
+          .get();
+
+      if (doc.exists) {
+        final data = doc.data()!;
+        final ids = (data['notificationIds'] as Map?)?.cast<String, dynamic>();
+
+        if (ids != null) {
+          for (final entry in ids.entries) {
+            final idVal = entry.value;
+            if (idVal is int) {
+              await NotificationService.cancel(idVal);
+            } else if (idVal is num) {
+              await NotificationService.cancel(idVal.toInt());
+            }
+          }
         }
-        final exists = (await docRef.get()).exists;
-        if (exists) {
-          await docRef.update({'notificationIds': FieldValue.delete()});
+
+        // Also cancel any single stored reminder id
+        if (data['reminderNotificationId'] is int) {
+          await NotificationService.cancel(data['reminderNotificationId'] as int);
+        } else if (data['reminderNotificationId'] is num) {
+          await NotificationService.cancel((data['reminderNotificationId'] as num).toInt());
         }
       }
 
-      _fallbackTimers.remove(medId)?.cancel();
-
-      // Then scrub any stragglers by payload & stable IDs
-      await NotificationService.scrubByMed(uid, medId);
-
+      // 3️⃣ Remove from Hive cache too
       await Hive.box('scheduled_reminders').delete(medId);
 
-      await NotificationService.showNow(
-        'Medication Deleted',
-        '$name has been deleted and its reminders were removed.',
-      );
-
-      if (kDebugMode) print('🗑️ Canceled reminders for $medId');
+      print('🗑️ Fully canceled all reminders and expiry warnings for med $medId');
     } catch (e) {
-      if (kDebugMode) print('⚠️ cancelForMed error: $e');
+      print('⚠️ cancelForMed error: $e');
     }
   }
 }
