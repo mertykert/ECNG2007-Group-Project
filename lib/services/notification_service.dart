@@ -108,7 +108,7 @@ class NotificationService {
 
     if (Platform.isAndroid) {
       await Permission.notification.request();
-      await _requestExactAlarmPermission(); // ✅ this now runs correctly
+      await _requestExactAlarmPermission(); //  this now runs correctly
     }
 
     final android = _plugin.resolvePlatformSpecificImplementation<
@@ -132,6 +132,7 @@ class NotificationService {
       _channelId,
       _channelName,
       channelDescription: _channelDesc,
+      icon: '@drawable/ic_stat_medicare',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
