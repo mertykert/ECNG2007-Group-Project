@@ -1,18 +1,24 @@
 // ============================================================================
-// lib/features/Medication/add_medication.dart
-// Wraps the form in ADD mode (keeps your route/component name).
+// lib/features/Medication/add_medication.dart  (FINAL – matches MedicationForm)
 // ============================================================================
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'medication_form.dart';
 
 class AddMedicationScreen extends StatelessWidget {
+  const AddMedicationScreen({
+    super.key,
+    this.initialDate,
+    this.ownerId, // optional override for caregivers
+  });
+
   final DateTime? initialDate;
-  const AddMedicationScreen({super.key, this.initialDate});
+  final String? ownerId;
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final String uid = ownerId ?? FirebaseAuth.instance.currentUser!.uid;
+    // Single source of truth: reuse the shared form
     return MedicationForm(
       mode: MedicationFormMode.add,
       ownerId: uid,

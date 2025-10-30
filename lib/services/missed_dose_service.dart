@@ -12,7 +12,7 @@ class MissedDoseService {
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final lastRun = prefs.getString('lastMissedCheck_$uid');
 
-      // ✅ Only run once per day
+      //  Only run once per day
       if (lastRun == today) {
         return;
       }
@@ -42,7 +42,7 @@ class MissedDoseService {
         }
       }
 
-      // ✅ Write summary
+      //  Write summary
       if (missedList.isNotEmpty) {
         await _firestore
             .collection('users')

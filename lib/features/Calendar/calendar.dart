@@ -31,49 +31,69 @@ class _SchedulePageState extends State<SchedulePage> {
   CalendarView _currentView = CalendarView.month;
 
   /// Stream all medications for both user and partner (dedup by name/time/date)
-  Stream<List<Map<String, dynamic>>> _getMedicationsStream() async* {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+  // returns List<Map> (id + ownerId included for convenience)
+  Stream<List<Map<String, dynamic>>> _getMedicationsStream() {
+    final users = FirebaseFirestore.instance.collection('users');
 
-    final userDoc =
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    final partnerId = userDoc.data()?['linkedPartner'];
+    return _targetUidStream().asyncExpand((uid) {
+      return users
+          .doc(uid)
+          .collection('medications')
+          .snapshots()
+          .map((s) => s.docs.map((d) {
+        final m = Map<String, dynamic>.from(d.data());
+        m['id'] = d.id;        // helpful to keep around
+        m['ownerId'] = uid;    // helpful if you need owner context
+        return m;
+      }).toList());
+    });
+  }
 
-    final userStream = FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('medications')
-        .snapshots()
-        .map((snap) =>
-        snap.docs.map((d) => {'id': d.id, 'ownerId': user.uid, ...d.data()}).toList());
 
-    if (partnerId == null || partnerId.toString().isEmpty) {
-      yield* userStream;
-      return;
+
+  // Role-aware target uid resolution.
+// Caregiver => active receiver (linkedPartner) if set; else self.
+// Receiver  => always self (never write/read under caregiver!).
+  Stream<String> _targetUidStream() {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return const Stream.empty();
+    final users = FirebaseFirestore.instance.collection('users');
+
+    return users.doc(me.uid).snapshots().map((meSnap) {
+      final d = meSnap.data() ?? {};
+      final role = (d['role'] as String?)?.toLowerCase() ?? '';
+
+      if (role == 'caregiver') {
+        final partner = (d['linkedPartner'] as String?)?.trim() ?? '';
+        if (partner.isNotEmpty) return partner;
+        final list = (d['linkedReceivers'] as List?)?.cast<String>() ?? const <String>[];
+        if (list.isNotEmpty) return list.first;
+        return me.uid; // fallback
+      }
+
+      // receiver or unknown role -> self
+      return me.uid;
+    });
+  }
+
+  Future<String> _getTargetUserId() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return '';
+    final userRef = FirebaseFirestore.instance.collection('users').doc(me.uid);
+    final snap = await userRef.get(const GetOptions(source: Source.serverAndCache));
+    final d = snap.data() ?? {};
+    final role = (d['role'] as String?)?.toLowerCase() ?? '';
+
+    if (role == 'caregiver') {
+      final partner = (d['linkedPartner'] as String?)?.trim() ?? '';
+      if (partner.isNotEmpty) return partner;
+      final list = (d['linkedReceivers'] as List?)?.cast<String>() ?? const <String>[];
+      if (list.isNotEmpty) return list.first;
+      return me.uid; // fallback
     }
 
-    final partnerStream = FirebaseFirestore.instance
-        .collection('users')
-        .doc(partnerId)
-        .collection('medications')
-        .snapshots()
-        .map((snap) => snap.docs
-        .map((d) => {'id': d.id, 'ownerId': partnerId, ...d.data()})
-        .toList());
-
-    yield* CombineLatestStream.combine2(
-      userStream,
-      partnerStream,
-          (List<Map<String, dynamic>> a, List<Map<String, dynamic>> b) {
-        final combined = [...a, ...b];
-        final unique = <String, Map<String, dynamic>>{};
-        for (final med in combined) {
-          final key = "${med['name']}_${med['time']}_${med['date']}";
-          unique[key] = med;
-        }
-        return unique.values.toList();
-      },
-    );
+    // receiver or unknown role -> self
+    return me.uid;
   }
 
   /// Toggle taken state for a specific date (per-day tracking)
@@ -118,28 +138,6 @@ class _SchedulePageState extends State<SchedulePage> {
       if (newStatus && selectedDateStr == todayStr) {
         final perDose = (medData['perDose'] ?? 1) as int;
         await RefillService.onDoseTaken(ownerId, id, perDose: perDose);
-      }
-
-      // Mirror to partner
-      final ownerUserDoc = await ownerRef.get();
-      final partnerId = ownerUserDoc.data()?['linkedPartner'];
-      if (partnerId != null && partnerId.toString().isNotEmpty) {
-        final partnerMedRef = FirebaseFirestore.instance
-            .collection('users')
-            .doc(partnerId)
-            .collection('medications');
-
-        final match = await partnerMedRef
-            .where('name', isEqualTo: medData['name'])
-            .where('time', isEqualTo: medData['time'])
-            .get();
-
-        for (var doc in match.docs) {
-          await partnerMedRef.doc(doc.id).update({
-            'taken': newStatus,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-        }
       }
     } catch (_) {
       // Rollback on failure
@@ -186,26 +184,6 @@ class _SchedulePageState extends State<SchedulePage> {
       await _cancelMedNotifications(medSnap.data()!);
 
       await medSnap.reference.delete();
-
-      // partner mirror (unchanged) ...
-      final ownerUserDoc = await ownerRef.get();
-      final partnerId = ownerUserDoc.data()?['linkedPartner']?.toString();
-      if (partnerId != null && partnerId.isNotEmpty) {
-        final partnerMedRef = FirebaseFirestore.instance
-            .collection('users')
-            .doc(partnerId)
-            .collection('medications');
-
-        final match = await partnerMedRef
-            .where('name', isEqualTo: medSnap.data()!['name'])
-            .where('time', isEqualTo: medSnap.data()!['time'])
-            .where('date', isEqualTo: medSnap.data()!['date'])
-            .get();
-
-        for (final doc in match.docs) {
-          await partnerMedRef.doc(doc.id).delete();
-        }
-      }
 
       if (!mounted) return;
       setState(() {}); // refresh
@@ -653,14 +631,16 @@ class _SchedulePageState extends State<SchedulePage> {
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFF2d59f0),
         onPressed: () async {
+          final ownerId = await _getTargetUserId(); // active receiver or self
+          if (!mounted || ownerId.isEmpty) return;
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) =>
-                  AddMedicationScreen(initialDate: _selectedDay ?? _focusedDay),
+              builder: (_) => AddMedicationScreen(ownerId: ownerId, initialDate: _selectedDay ?? _focusedDay)
             ),
           );
         },
+
         child: const Icon(Icons.add, color: Colors.white),
       ),
       body: SafeArea(

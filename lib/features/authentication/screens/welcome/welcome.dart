@@ -3,8 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:auto_size_text/auto_size_text.dart';
 
-import '../../../../services/notification_service.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -20,6 +20,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   late final Animation<double> _fadeAnimation;
   late final Animation<Offset> _slideAnimation;
   late final Future<LottieComposition> _dnaComposition;
+  final _titleGroup = AutoSizeGroup();
+
 
   @override
   void initState() {
@@ -117,11 +119,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
             // Logo
             Positioned(
               left: size.width * 0.05,
-              top: size.height * 0.03,
+              top: size.height * 0.02,
               child: Image.asset(
                 "assets/images/medcross.png",
-                width: size.width * 0.12,
-                height: size.width * 0.12,
+                width: size.width * 0.15,
+                height: size.width * 0.15,
               ),
             ),
 
@@ -146,28 +148,39 @@ class _WelcomeScreenState extends State<WelcomeScreen>
               top: size.height * 0.18,
               child: FadeTransition(
                 opacity: _fadeAnimation,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Improving",
-                      style: TextStyle(
-                        fontFamily: "Inter",
-                        fontWeight: FontWeight.w600,
-                        fontSize: size.width * 0.095,
-                        color: Colors.white,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: size.width * 0.62),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AutoSizeText(
+                        "Improving",
+                        maxLines: 1,
+                        minFontSize: 16,
+                        stepGranularity: 0.5,
+                        group: _titleGroup,
+                        style: TextStyle(
+                          fontFamily: "Inter",
+                          fontWeight: FontWeight.w600,
+                          fontSize: size.width * 0.095, // acts as the upper bound
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                    Text(
-                      "Health Care",
-                      style: TextStyle(
-                        fontFamily: "Inter",
-                        fontWeight: FontWeight.w600,
-                        fontSize: size.width * 0.095,
-                        color: Colors.white,
+                      AutoSizeText(
+                        "Health Care",
+                        maxLines: 1,
+                        minFontSize: 16,
+                        stepGranularity: 0.5,
+                        group: _titleGroup,
+                        style: TextStyle(
+                          fontFamily: "Inter",
+                          fontWeight: FontWeight.w600,
+                          fontSize: size.width * 0.095,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -481,8 +481,6 @@ class _MedicationFormState extends State<MedicationForm> {
       if (ownerId == null) return;
 
       final userRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
-      final userDoc = await userRef.get();
-      final partnerId = userDoc.data()?['linkedPartner'];
 
       final dateStr  = DateFormat('yyyy-MM-dd').format(_targetDate);
       final timeStr  = _selectedTime!.format(context);
@@ -501,6 +499,7 @@ class _MedicationFormState extends State<MedicationForm> {
           'taken': _taken,
           'date': dateStr,
           'createdAt': FieldValue.serverTimestamp(),
+          'ownerUid': ownerId,
           'addedBy': ownerId,
           'expiryDate': _expiryCtrl.text.trim(),
           'totalPills': total,
@@ -524,13 +523,6 @@ class _MedicationFormState extends State<MedicationForm> {
             'expiryDate': _expiryCtrl.text.trim(),
           },
         );
-
-        if (partnerId != null && partnerId.toString().isNotEmpty) {
-          await FirebaseFirestore.instance
-              .collection('users').doc(partnerId)
-              .collection('medications').doc(medRef.id)
-              .set(payload, SetOptions(merge: true));
-        }
 
         await RefillService.checkOne(ownerId, medRef.id);
 
@@ -565,6 +557,7 @@ class _MedicationFormState extends State<MedicationForm> {
           'repeat': _repeat,
           'taken': _taken,
           'date': dateStr,
+          'ownerUid': ownerId,
           'expiryDate': _expiryCtrl.text.trim(),
           'totalPills': int.tryParse(_totalCtrl.text.trim()) ?? (old['totalPills'] ?? 0),
           'perDose': perDose,
@@ -586,13 +579,6 @@ class _MedicationFormState extends State<MedicationForm> {
             'expiryDate': _expiryCtrl.text.trim(),
           },
         );
-
-        if (partnerId != null && partnerId.toString().isNotEmpty) {
-          await FirebaseFirestore.instance
-              .collection('users').doc(partnerId)
-              .collection('medications').doc(widget.medId!)
-              .set(update, SetOptions(merge: true));
-        }
 
         await RefillService.checkOne(ownerId, widget.medId!);
 

@@ -62,7 +62,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       String partnerCode = ''; //  Declare once here
 
       try {
-        // 🔹 Create Firebase Auth account
+        //  Create Firebase Auth account
         UserCredential userCredential =
         await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: _emailController.text.trim(),
@@ -74,10 +74,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
         if (user != null) {
           await user.sendEmailVerification();
 
-          // ✅ Generate unique partner code
+          //  Generate unique partner code
           partnerCode = _generatePartnerCode();
 
-          // 🔹 Save to Firestore
+          //  Save to Firestore
           await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
             'name': _nameController.text.trim(),
             'email': _emailController.text.trim(),
@@ -95,7 +95,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
             color: Colors.greenAccent,
           );
 
-          // ✅ Show dialog with partner code
+          //  Show dialog with partner code
           await showDialog(
             context: context,
             builder: (_) => AlertDialog(

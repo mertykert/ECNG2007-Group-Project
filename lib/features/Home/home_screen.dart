@@ -20,6 +20,7 @@ import '../../services/notification_service.dart';
 import '../../widgets/missed_counts_chips.dart';
 import 'package:medi_care/services/offline_service.dart';
 import '../../widgets/fancy_drawer.dart';
+import 'package:medi_care/services/partner_service.dart' as partner_service;
 
 // small enum for the popup menu (must be top-level)
 enum _MedAction { edit, delete }
@@ -32,7 +33,7 @@ enum _MedAction { edit, delete }
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
   static final GlobalKey<FancyDrawerScaffoldState> _drawerKey =
-    GlobalKey<FancyDrawerScaffoldState>();
+  GlobalKey<FancyDrawerScaffoldState>();
 
 
   @override
@@ -41,7 +42,7 @@ class HomeScreen extends StatelessWidget {
       key: _drawerKey,
       drawer: const _AppDrawer(), // left menu content (converted from your Drawer)
       body: const _HomeContent(), // your original screen (moved below)
-       drawerWidthFraction: 0.82,
+      drawerWidthFraction: 0.82,
       backgroundColor: const Color(0xFF2d59f0),
     );
   }
@@ -58,7 +59,6 @@ class _SidebarItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-
 
   @override
   Widget build(BuildContext context) {
@@ -108,15 +108,65 @@ class _AppDrawer extends StatefulWidget {
 
 String? linkedPartnerId;
 String? linkedPartnerName;
+List<String> _linkedReceivers = const [];
+StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _meSub;
 
 class _AppDrawerState extends State<_AppDrawer> {
   String caregiverName = "Loading...";
+  String _userRole = ''; // caregiver|receiver
 
   @override
   void initState() {
     super.initState();
     _loadCaregiverName();
     _refreshLinkInfo();
+    _loadLinkedReceiversList();
+
+    //  Live listener keeps drawer in sync automatically
+    final me = FirebaseAuth.instance.currentUser;
+    if (me != null) {
+      _meSub = FirebaseFirestore.instance
+          .collection('users')
+          .doc(me.uid)
+          .snapshots()
+          .listen((snap) {
+        final d = snap.data() ?? {};
+        final partnerId = (d['linkedPartner'] as String?)?.trim();
+        final role = (d['role'] as String?)?.toLowerCase() ?? '';
+        final list = (d['linkedReceivers'] as List?)?.cast<String>() ?? const <String>[];
+
+        if (!mounted) return;
+        setState(() {
+          _userRole = role;
+          linkedPartnerId = partnerId;
+          // keep name if we have it; resolve async if changed
+          _linkedReceivers = list;
+        });
+
+        // Resolve partner name lazily if needed
+        if (partnerId != null && partnerId.isNotEmpty) {
+          FirebaseFirestore.instance.collection('users').doc(partnerId)
+              .get(const GetOptions(source: Source.serverAndCache)).then((p) {
+            if (!mounted) return;
+            final pd = p.data() ?? {};
+            setState(() {
+              linkedPartnerName = (pd['profile']?['name'] as String?) ??
+                  (pd['name'] as String?) ??
+                  (pd['email'] as String?);
+            });
+          });
+        } else {
+          if (!mounted) return;
+          setState(() => linkedPartnerName = null);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _meSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadCaregiverName() async {
@@ -125,46 +175,83 @@ class _AppDrawerState extends State<_AppDrawer> {
     final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
     if (!mounted) return;
     if (doc.exists) {
-      setState(() => caregiverName = (doc.data()?['name'] as String?) ?? 'Caregiver');
+      final data = doc.data()!;
+      setState(() {
+        caregiverName = (data['name'] as String?) ?? 'Caregiver';
+        _userRole = (data['role'] as String?)?.toLowerCase() ?? '';
+      });
     }
   }
 
+  Future<void> _loadLinkedReceiversList() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return;
 
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(me.uid)
+        .get(const GetOptions(source: Source.serverAndCache));
+
+    final data = doc.data() ?? {};
+    final role = (data['role'] as String?)?.toLowerCase() ?? '';
+
+    // Caregivers keep the list; receivers typically don't.
+    if (role == 'caregiver') {
+      final list = (data['linkedReceivers'] as List?)?.cast<String>() ?? const <String>[];
+      if (!mounted) return;
+      setState(() {
+        _linkedReceivers = list;
+      });
+    } else {
+      // Receiver: ensure local list is empty to avoid stale UI
+      if (!mounted) return;
+      setState(() {
+        _linkedReceivers = const <String>[];
+      });
+    }
+  }
 
   Future<void> _refreshLinkInfo() async {
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) return;
-    final meDoc = await FirebaseFirestore.instance.collection('users').doc(me.uid).get();
-    final partnerId = (meDoc.data()?['linkedPartner'] as String?)?.trim();
-    if (partnerId == null || partnerId.isEmpty) {
+
+    try {
+      final meDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(me.uid)
+          .get(const GetOptions(source: Source.serverAndCache));
+
+      final data = meDoc.data() ?? {};
+      final partnerId = (data['linkedPartner'] as String?)?.trim();
+      String? partnerName;
+
+      if (partnerId != null && partnerId.isNotEmpty) {
+        final pDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(partnerId)
+            .get(const GetOptions(source: Source.serverAndCache));
+        final pd = pDoc.data() ?? {};
+        partnerName = (pd['profile']?['name'] as String?) ??
+            (pd['name'] as String?) ??
+            (pd['email'] as String?);
+      }
+
       if (!mounted) return;
       setState(() {
-        linkedPartnerId = null;
-        linkedPartnerName = null;
+        linkedPartnerId = partnerId;
+        linkedPartnerName = partnerName;
+        _userRole = (data['role'] as String?)?.toLowerCase() ?? '';
       });
-      return;
+    } catch (_) {
+      // keep current state on transient failures
     }
-    final pDoc = await FirebaseFirestore.instance.collection('users').doc(partnerId).get();
-    if (!mounted) return;
-    setState(() {
-      linkedPartnerId = partnerId;
-      linkedPartnerName = pDoc.data()?['name'] as String? ?? 'Partner';
-    });
   }
 
   Future<void> _unlinkPartner() async {
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) return;
 
-    // Nothing to unlink
-    if (linkedPartnerId == null || linkedPartnerId!.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("You're not linked to a partner.")),
-      );
-      return;
-    }
-
+    // Confirm UI
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -187,38 +274,338 @@ class _AppDrawerState extends State<_AppDrawer> {
         ],
       ),
     );
-
     if (confirm != true) return;
 
-    final users = FirebaseFirestore.instance.collection('users');
-    final meRef = users.doc(me.uid);
-    final partnerRef = users.doc(linkedPartnerId);
+    try {
+      final db = FirebaseFirestore.instance;
+      final meRef = db.collection('users').doc(me.uid);
 
-    // Ensure we only unlink if the partner still points back to me (mutual link)
-    final meSnap = await meRef.get();
-    final pSnap  = await partnerRef.get();
-    final mePointsTo = (meSnap.data()?['linkedPartner'] as String?)?.trim();
-    final pPointsTo  = (pSnap.data()?['linkedPartner'] as String?)?.trim();
+      // 🔹 Always fetch fresh from server; don't trust local state.
+      final meSnap = await meRef.get(const GetOptions(source: Source.server));
+      final meData = meSnap.data() ?? {};
+      final myRole = (meData['role'] as String?)?.toLowerCase() ?? '';
+      String? partnerId = (meData['linkedPartner'] as String?)?.trim();
 
-    final batch = FirebaseFirestore.instance.batch();
-    if (mePointsTo == linkedPartnerId) {
-      batch.update(meRef, {'linkedPartner': FieldValue.delete()});
+      // 🔹 Receiver fallback: if linkedPartner missing, try reverse-lookup caregiver
+      if ((partnerId == null || partnerId.isEmpty) && myRole == 'receiver') {
+        final q = await db
+            .collection('users')
+            .where('linkedReceivers', arrayContains: me.uid)
+            .limit(1)
+            .get(const GetOptions(source: Source.server));
+        if (q.docs.isNotEmpty) {
+          partnerId = q.docs.first.id;
+        }
+      }
+
+      // Still nothing? Then we are not linked.
+      if (partnerId == null || partnerId.isEmpty) {
+        if (!mounted) return;
+        await _showToast(title: 'You are not linked to a partner.');
+        return;
+      }
+
+      final partnerRef = db.collection('users').doc(partnerId);
+      final pSnap = await partnerRef.get(const GetOptions(source: Source.server));
+      final pData = pSnap.data() ?? {};
+      final partnerPointsToMe = (pData['linkedPartner'] as String?)?.trim() == me.uid;
+
+      // 🔹 Unlink both sides and maintain caregiver list
+      final batch = db.batch();
+
+      // Clear my active link if present
+      if ((meData['linkedPartner'] as String?)?.trim() == partnerId) {
+        batch.update(meRef, {'linkedPartner': FieldValue.delete()});
+      }
+
+      // Clear their active link if it points back to me
+      if (pSnap.exists && partnerPointsToMe) {
+        batch.update(partnerRef, {'linkedPartner': FieldValue.delete()});
+      }
+
+      // Maintain caregiver's linkedReceivers[] on unlink
+      if (myRole == 'caregiver') {
+        batch.update(meRef, {'linkedReceivers': FieldValue.arrayRemove([partnerId])});
+      } else if (myRole == 'receiver') {
+        batch.update(partnerRef, {'linkedReceivers': FieldValue.arrayRemove([me.uid])});
+      }
+
+      await batch.commit();
+
+      if (!mounted) return;
+
+      // Refresh local UI state and list so the drawer/sheet updates immediately
+      setState(() {
+        linkedPartnerId = null;
+        linkedPartnerName = null;
+      });
+      await _refreshLinkInfo();      // reloads names/ids
+      await _loadLinkedReceiversList(); // repopulates caregiver list
+
+      await _showToast(title: 'Partner unlinked', success: true);
+    } catch (e) {
+      if (!mounted) return;
+      await _showToast(
+        title: 'Unlink failed',
+        message: e.toString().replaceFirst('Exception: ', ''),
+        success: false,
+      );
     }
-    if (pSnap.exists && pPointsTo == me.uid) {
-      batch.update(partnerRef, {'linkedPartner': FieldValue.delete()});
+  }
+
+
+  Future<void> switchActiveReceiver(String receiverUid) async {
+    await partner_service.switchActiveReceiver(receiverUid);
+  }
+
+  Future<void> _showSwitchReceiverSheet() async {
+    const blue = Color(0xFF2d59f0);
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return;
+
+// Force a fresh doc read (server pref) to avoid stale cache when sheet opens
+    final meDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(me.uid)
+        .get(const GetOptions(source: Source.serverAndCache));
+
+    final data = meDoc.data() ?? {};
+    final receivers = (data['linkedReceivers'] as List?)?.cast<String>() ?? const <String>[];
+    if (receivers.isEmpty) {
+      await _showInfoDialog('No Care Receivers', 'Link a partner first to switch.');
+      return;
     }
 
-    await batch.commit();
+    final initial = (data['linkedPartner'] as String?)?.trim() ?? receivers.first;
 
+    await showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        String sel = initial; // local state for the sheet
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: blue.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.all(8),
+                        child: const Icon(Icons.switch_account_rounded, color: blue, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text('Switch Care Receiver',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  for (final id in receivers)
+                    RadioListTile<String>(
+                      value: id,
+                      groupValue: sel,
+                      activeColor: blue,
+                      selected: id == sel,
+                      selectedTileColor: blue.withOpacity(0.06),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      onChanged: (v) => setLocal(() => sel = v ?? sel), // <-- local setState
+                      title: FutureBuilder<DocumentSnapshot>(
+                        future: FirebaseFirestore.instance.collection('users').doc(id)
+                            .get(const GetOptions(source: Source.serverAndCache)),
+                        builder: (c, s) {
+                          final d = (s.data?.data() as Map<String, dynamic>?) ?? {};
+                          final name  = (d['profile']?['name'] as String?) ??
+                              (d['name'] as String?) ??
+                              (d['email'] as String?) ?? id;
+                          final email = (d['email'] as String?) ?? '';
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name,
+                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.black87),
+                              ),
+                              if (email.isNotEmpty)
+                                Text(email,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.check_rounded, size: 18),
+                      label: const Text('Switch'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: blue,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () async {
+                        try {
+                          await partner_service.switchActiveReceiver(sel);
+                          await _refreshLinkInfo();
+                          if (!mounted) return;
+                          Navigator.pop(ctx);
+                          await _showInfoDialog('Done', 'Active care receiver switched.');
+                        } catch (e) {
+                          if (!mounted) return;
+                          await _showInfoDialog('Error', e.toString().replaceFirst('Exception: ', ''));
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+
+  Future<void> _startLinkFlow() async {
+    // Close the drawer first (FancyDrawer or Scaffold — keep what you use)
+    FancyDrawerScaffold.of(context)?.toggle();
+    // Scaffold.of(context).closeDrawer(); // if you use Scaffold's drawer
+
+    // Wait for the closing animation to finish to avoid disposed-context crashes
+    await Future.delayed(const Duration(milliseconds: 220));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Partner unlinked.")),
+
+    // IMPORTANT: expect a String (the code) or null on Cancel
+    final String? code = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,           // present above the whole app
+      builder: (_) => const LinkPartnerDialog(),  // DO NOT pass onSubmit
     );
 
-    setState(() {
-      linkedPartnerId = null;
-      linkedPartnerName = null;
-    });
+    // Cancel pressed
+    if (code == null || code.trim().isEmpty) return;
+
+    // Link pressed: call service with the code
+    try {
+      await partner_service.linkReceiverByCode(code.trim());
+      await _refreshLinkInfo();    // your existing refresh method
+      if (!mounted) return;
+      await _showToast(title: 'Linked successfully');
+      await _refreshLinkInfo();
+      await _loadLinkedReceiversList();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
+  Future<void> _showInfoDialog(String title, String message) async {
+    const blue = Color(0xFF2d59f0);
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      useRootNavigator: true,
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: blue.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: const Icon(Icons.info_rounded, color: blue, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+        content: Text(message, style: const TextStyle(color: Colors.black87)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showToast({
+    required String title,
+    String? message,
+    bool success = true,
+  }) async {
+    const blue = Color(0xFF2d59f0);
+    final bg = success ? blue : Colors.redAccent;
+    final fg = Colors.white;
+
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          elevation: 2,
+          backgroundColor: bg,
+          margin: const EdgeInsets.all(14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(success ? Icons.check_circle_rounded : Icons.error_outline_rounded, color: fg),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: TextStyle(
+                          color: fg,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          letterSpacing: .2,
+                        )),
+                    if (message != null && message.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(message, style: const TextStyle(color: Colors.black87)),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
   }
 
   @override
@@ -358,11 +745,20 @@ class _AppDrawerState extends State<_AppDrawer> {
                   sidebarItem(
                     icon: Icons.person_add_alt_1_rounded,
                     label: "Link Partner",
-                    onTap: () {
-                      FancyDrawerScaffold.of(context)?.toggle();
-                      showDialog(context: context, builder: (_) => const LinkPartnerDialog());
+                    onTap: () async {
+                      await _startLinkFlow();
                     },
                   ),
+                  if (_userRole == 'caregiver')
+                    sidebarItem(
+                      icon: Icons.switch_account_rounded,
+                      label: "Switch Care Receiver",
+                      onTap: () async {
+                        FancyDrawerScaffold.of(context)?.toggle();
+                        await _showSwitchReceiverSheet(); // defined below
+                      },
+                    ),
+
                   sidebarItem(
                     icon: Icons.link_off_rounded,
                     label: "Unlink Partner",
@@ -439,12 +835,13 @@ class _HomeContentState extends State<_HomeContent> {
     _todayProgressNotifier.value = 0.0;
     _loadCaregiverName();
     _setupMedicationsListener();
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      _loadWeeklyProgress(user.uid);
-      _loadTodayProgress(user.uid);
-      _adjustDailyRemainingPills(user.uid);
-    }
+    unawaited(() async {
+      final targetUid = await _getTargetUserId();
+      if (!mounted || targetUid.isEmpty) return;
+      _loadWeeklyProgress(targetUid);
+      _loadTodayProgress(targetUid);
+      _adjustDailyRemainingPills(targetUid);
+    }());
   }
 
   @override
@@ -453,15 +850,6 @@ class _HomeContentState extends State<_HomeContent> {
     weeklyProgressNotifier.dispose();
     _todayProgressNotifier.dispose();
     super.dispose();
-  }
-
-  Future<String> _getTargetUserId() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return '';
-    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    return (doc.data()?['linkedPartner'] as String?)?.trim().isNotEmpty == true
-        ? doc['linkedPartner']
-        : user.uid;
   }
 
   Future<void> _loadCaregiverName() async {
@@ -519,67 +907,58 @@ class _HomeContentState extends State<_HomeContent> {
     return result ?? false;
   }
 
-  void _setupMedicationsListener() async {
-    final targetUserId = await _getTargetUserId();
-    if (targetUserId.isEmpty) return;
-
-    _medListener = FirebaseFirestore.instance
-        .collection('users')
-        .doc(targetUserId)
-        .collection('medications')
-        .snapshots()
-        .listen((_) {
+  void _setupMedicationsListener() {
+    _medListener?.cancel();
+    _medListener = _targetUidStream().listen((targetUserId) {
+      // cancel any previous meds sub
       _updateThrottle?.cancel();
-      _updateThrottle = Timer(const Duration(milliseconds: 800), () {
-        _loadWeeklyProgress(targetUserId);
-        _loadTodayProgress(targetUserId);
-      });
-    });
 
-    _loadWeeklyProgress(targetUserId);
-    _loadTodayProgress(targetUserId);
+      // re-subscribe to that user's medications
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(targetUserId)
+          .collection('medications')
+          .snapshots()
+          .listen((_) {
+        _updateThrottle?.cancel();
+        _updateThrottle = Timer(const Duration(milliseconds: 800), () {
+          _loadWeeklyProgress(targetUserId);
+          _loadTodayProgress(targetUserId);
+        });
+      });
+
+      // also do an immediate load for the new target
+      _loadWeeklyProgress(targetUserId);
+      _loadTodayProgress(targetUserId);
+    });
   }
 
+
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _getTodayMedicationsStream() async* {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    final partnerId = userDoc.data()?['linkedPartner'];
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-    final userStream = FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('medications')
-        .where('date', isEqualTo: today)
-        .snapshots()
-        .map((snap) => snap.docs);
-
-    if (partnerId == null || partnerId.toString().isEmpty) {
-      yield* userStream;
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) {
+      yield const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
       return;
     }
 
-    final partnerStream = FirebaseFirestore.instance
-        .collection('users')
-        .doc(partnerId)
-        .collection('medications')
-        .where('date', isEqualTo: today)
-        .snapshots()
-        .map((snap) => snap.docs);
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final users = FirebaseFirestore.instance.collection('users');
 
-    yield* Rx.combineLatest2(userStream, partnerStream, (a, b) {
-      final combined = [...a, ...b];
-      final unique = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
-      for (final doc in combined) {
-        final data = doc.data();
-        final key = "${data['name'] ?? ''}_${data['time'] ?? ''}_${data['date'] ?? ''}";
-        unique[key] = doc;
-      }
-      return unique.values.toList();
+    // React to active partner changes automatically
+    yield* users.doc(me.uid).snapshots().switchMap((meSnap) {
+      final data = meSnap.data() ?? {};
+      final partnerId = (data['linkedPartner'] as String?)?.trim();
+      final targetUid = (partnerId != null && partnerId.isNotEmpty) ? partnerId : me.uid;
+
+      final medsQuery = users
+          .doc(targetUid)
+          .collection('medications')
+          .where('date', isEqualTo: today);
+
+      return medsQuery.snapshots().map((snap) => snap.docs);
     });
   }
+
 
   Future<void> _markAsTaken(String ownerId, String id, bool currentStatus) async {
     final userRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
@@ -596,26 +975,6 @@ class _HomeContentState extends State<_HomeContent> {
       final remaining = ((medData['remainingPills'] ?? medData['totalPills'] ?? 0) as int) - perDose;
       await medSnap.reference.update({'remainingPills': remaining.clamp(0, 100000)});
       await RefillService.checkOne(ownerId, id);
-    }
-
-    final ownerDoc = await FirebaseFirestore.instance.collection('users').doc(ownerId).get();
-    final partnerId = ownerDoc.data()?['linkedPartner'];
-    if (partnerId == null || partnerId.toString().isEmpty) {
-      _loadTodayProgress(ownerId);
-      if (mounted) setState(() {});
-      return;
-    }
-
-    if (partnerId != null && partnerId.toString().isNotEmpty) {
-      final partnerRef = FirebaseFirestore.instance.collection('users').doc(partnerId).collection('medications');
-      final match = await partnerRef
-          .where('name', isEqualTo: medData['name'])
-          .where('time', isEqualTo: medData['time'])
-          .where('date', isEqualTo: medData['date'])
-          .get();
-      for (var doc in match.docs) {
-        await doc.reference.update({'taken': newStatus});
-      }
     }
 
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -640,57 +999,36 @@ class _HomeContentState extends State<_HomeContent> {
       final todayKey = 'lastAdjusted_$uid';
       final lastAdjusted = prefs.getString(todayKey);
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      if (lastAdjusted == today) return;
 
-      if (lastAdjusted == today) return; // already adjusted today
+      final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+      final meds = await ref.collection('medications').where('date', isEqualTo: today).get();
+      final missedMeds = <Map<String, dynamic>>[];
 
-      final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-      final userDoc = await userRef.get();
-      final partnerId = (userDoc.data()?['linkedPartner'] as String?)?.trim();
+      for (final doc in meds.docs) {
+        final data = doc.data();
+        final taken = data['taken'] == true;
+        final alreadyAdjusted = data['adjustedFor'] == today;
 
-      // collect all meds for user + partner
-      final owners = [uid, if (partnerId != null && partnerId.isNotEmpty) partnerId];
-      for (final owner in owners) {
-        final ref = FirebaseFirestore.instance.collection('users').doc(owner);
-        final meds = await ref
-            .collection('medications')
-            .where('date', isEqualTo: today)
-            .get();
+        if (taken && !alreadyAdjusted) {
+          final perDose = (data['perDose'] ?? 1) as int;
+          final remaining = ((data['remainingPills'] ?? data['totalPills'] ?? 0) as int) - perDose;
 
-        final missedMeds = <Map<String, dynamic>>[];
-
-        for (final doc in meds.docs) {
-          final data = doc.data();
-          final taken = data['taken'] == true;
-          final alreadyAdjusted = data['adjustedFor'] == today;
-
-          if (taken && !alreadyAdjusted) {
-            // only decrease once per day
-            final perDose = (data['perDose'] ?? 1) as int;
-            final remaining =
-                ((data['remainingPills'] ?? data['totalPills'] ?? 0) as int) - perDose;
-
-            await doc.reference.update({
-              'remainingPills': remaining.clamp(0, 100000),
-              'adjustedFor': today,
-            });
-
-            await RefillService.checkOne(owner, doc.id);
-          } else if (!taken) {
-            missedMeds.add({
-              'name': data['name'],
-              'time': data['time'],
-            });
-          }
-        }
-
-        // Save missed meds summary for this owner
-        if (missedMeds.isNotEmpty) {
-          await ref.collection('missed').doc(today).set({'meds': missedMeds});
+          await doc.reference.update({
+            'remainingPills': remaining.clamp(0, 100000),
+            'adjustedFor': today,
+          });
+          await RefillService.checkOne(uid, doc.id);
+        } else if (!taken) {
+          missedMeds.add({'name': data['name'], 'time': data['time']});
         }
       }
 
+      if (missedMeds.isNotEmpty) {
+        await ref.collection('missed').doc(today).set({'meds': missedMeds});
+      }
+
       await prefs.setString(todayKey, today);
-      debugPrint("✅ Adjusted remaining pills & marked missed meds for $today");
     } catch (e) {
       debugPrint("⚠️ adjustDailyRemainingPills failed: $e");
     }
@@ -731,30 +1069,6 @@ class _HomeContentState extends State<_HomeContent> {
 
     await medSnap.reference.delete();
 
-    // partner mirror + offline cleanup (same as before) ...
-    final ownerDoc = await userRef.get();
-    final partnerId = ownerDoc.data()?['linkedPartner']?.toString();
-    if (partnerId != null && partnerId.isNotEmpty) {
-      final partnerRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(partnerId)
-          .collection('medications');
-
-      final partnerDocById = await partnerRef.doc(id).get();
-      if (partnerDocById.exists) {
-        await partnerDocById.reference.delete();
-      } else {
-        final match = await partnerRef
-            .where('name', isEqualTo: data['name'])
-            .where('time', isEqualTo: data['time'])
-            .where('date', isEqualTo: data['date'])
-            .get();
-        for (final doc in match.docs) {
-          await doc.reference.delete();
-        }
-      }
-    }
-
     final todayDel = DateFormat('yyyy-MM-dd').format(DateTime.now());
     await OfflineService.deleteTodayMedById(ownerId, todayDel, id);
 
@@ -765,135 +1079,181 @@ class _HomeContentState extends State<_HomeContent> {
     return true;
   }
 
-  Future<void> _loadTodayProgress(String uid) async {
+  Future<void> _loadTodayProgress(String targetUid) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final partnerId = userDoc.data()?['linkedPartner'];
-      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      List<QuerySnapshot> results = [];
-
-      results.add(await FirebaseFirestore.instance
+      final snap = await FirebaseFirestore.instance
           .collection('users')
-          .doc(user.uid)
+          .doc(targetUid)
           .collection('medications')
-          .where('date', isEqualTo: today)
-          .get());
+          .get();
 
-      if (partnerId != null && partnerId.toString().isNotEmpty) {
-        results.add(await FirebaseFirestore.instance
-            .collection('users')
-            .doc(partnerId)
-            .collection('medications')
-            .where('date', isEqualTo: today)
-            .get());
-      }
+      final today = DateTime.now();
+      final todays = snap.docs.map((d) {
+        final m = Map<String, dynamic>.from(d.data());
+        m['id'] = d.id;
+        return m;
+      }).where((m) => _isScheduledForDay(m, today)).toList();
 
-      final allDocs = results.expand((r) => r.docs).toList();
-      if (allDocs.isEmpty) {
+      if (todays.isEmpty) {
         _todayProgressNotifier.value = 0.0;
-        await OfflineService.saveTodayProgress(uid, today, 0.0);
+        await OfflineService.saveTodayProgress(targetUid, DateFormat('yyyy-MM-dd').format(today), 0.0);
       } else {
-        final total = allDocs.length;
-        final taken = allDocs.where((d) => d['taken'] == true).length;
+        final total = todays.length;
+        final taken = todays.where((m) => m['taken'] == true).length;
         final ratio = total == 0 ? 0.0 : taken / total;
         _todayProgressNotifier.value = ratio;
-        await OfflineService.saveTodayProgress(uid, today, ratio);
+        await OfflineService.saveTodayProgress(
+          targetUid, DateFormat('yyyy-MM-dd').format(today), ratio,
+        );
 
-        final mapped = allDocs.map((d) {
-          final data = d.data() as Map<String, dynamic>;
-          return {
-            'id': d.id,
-            'owner': d.reference.parent.parent!.id,
-            'name': data['name'],
-            'time': data['time'],
-            'date': data['date'],
-            'taken': data['taken'],
-            'remainingPills': data['remainingPills'],
-            'expiryDate': data['expiryDate'],
-          };
-        }).toList();
-
-        await OfflineService.saveTodayMeds(uid, today, mapped);
+        // optional: cache list for offline
+        await OfflineService.saveTodayMeds(
+          targetUid,
+          DateFormat('yyyy-MM-dd').format(today),
+          todays,
+        );
       }
-    } catch (e) {
-      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final cached = OfflineService.loadTodayProgress(uid, today);
-      if (cached != null) {
-        _todayProgressNotifier.value = cached;
-        debugPrint("⚠️ Using cached today progress due to: $e");
-      }
+    } catch (_) {
+      final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final cached = OfflineService.loadTodayProgress(targetUid, todayStr);
+      if (cached != null) _todayProgressNotifier.value = cached;
     }
   }
 
-  Future<void> _loadWeeklyProgress(String uid) async {
+  Future<void> _loadWeeklyProgress(String targetUid) async {
     if (!mounted) return;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
     try {
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (!mounted) return;
+      final users = FirebaseFirestore.instance.collection('users');
+      final all = await users.doc(targetUid).collection('medications').get();
+      final meds = all.docs.map((d) => Map<String, dynamic>.from(d.data())).toList();
 
-      final partnerId = userDoc.data()?['linkedPartner'];
       final now = DateTime.now();
-      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-      List<double> progress = [];
+      final start = now.subtract(Duration(days: now.weekday - 1));
+      final progress = <double>[];
 
       for (int i = 0; i < 7; i++) {
-        final dateStr = DateFormat('yyyy-MM-dd').format(startOfWeek.add(Duration(days: i)));
-        List<QuerySnapshot> results = [];
-        if (!mounted) return;
-
-        results.add(await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .collection('medications')
-            .where('date', isEqualTo: dateStr)
-            .get());
-
-        if (partnerId != null && partnerId.toString().isNotEmpty) {
-          results.add(await FirebaseFirestore.instance
-              .collection('users')
-              .doc(partnerId)
-              .collection('medications')
-              .where('date', isEqualTo: dateStr)
-              .get());
-        }
-
-        if (!mounted) return;
-
-        final allDocs = results.expand((r) => r.docs).toList();
-        if (allDocs.isEmpty) {
+        final day = DateTime(start.year, start.month, start.day + i);
+        final todays = meds.where((m) => _isScheduledForDay(m, day)).toList();
+        if (todays.isEmpty) {
           progress.add(0.0);
         } else {
-          final total = allDocs.length;
-          final taken = allDocs.where((d) => d['taken'] == true).length;
+          final total = todays.length;
+          final taken = todays.where((m) => m['taken'] == true).length;
           progress.add(taken / total);
         }
       }
 
-      if (mounted) {
-        weeklyProgressNotifier.value = progress;
-        final weekStartIso = DateFormat('yyyy-MM-dd').format(startOfWeek);
-        await OfflineService.saveWeekProgress(uid, weekStartIso, progress);
-      }
-    } catch (e) {
-      // Today fallback
-      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final cached = OfflineService.loadTodayProgress(uid, today);
-      if (cached != null) _todayProgressNotifier.value = cached;
+      if (!mounted) return;
+      weeklyProgressNotifier.value = progress;
 
+      final weekStartIso = DateFormat('yyyy-MM-dd').format(start);
+      await OfflineService.saveWeekProgress(targetUid, weekStartIso, progress);
+    } catch (_) {
       final now = DateTime.now();
-      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-      final weekKey = DateFormat('yyyy-MM-dd').format(startOfWeek);
-      final cachedWeek = OfflineService.loadWeekProgress(uid, weekKey);
-      if (cachedWeek != null && mounted) weeklyProgressNotifier.value = cachedWeek;
-
-      debugPrint("Offline fallback used: $e");
+      final start = now.subtract(Duration(days: now.weekday - 1));
+      final weekKey = DateFormat('yyyy-MM-dd').format(start);
+      final cached = OfflineService.loadWeekProgress(targetUid, weekKey);
+      if (cached != null && mounted) weeklyProgressNotifier.value = cached;
     }
   }
+
+  Future<void> _showInfoDialog(String title, String message) async {
+    const blue = Color(0xFF2d59f0);
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      useRootNavigator: true,
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: blue.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: const Icon(Icons.info_rounded, color: blue, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+        content: Text(message, style: const TextStyle(color: Colors.black87)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Role-aware target uid resolution.
+// Caregiver => active receiver (linkedPartner) if set; else self.
+// Receiver  => always self (never write/read under caregiver!).
+  Stream<String> _targetUidStream() {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return const Stream.empty();
+    final users = FirebaseFirestore.instance.collection('users');
+
+    return users.doc(me.uid).snapshots().map((meSnap) {
+      final d = meSnap.data() ?? {};
+      final role = (d['role'] as String?)?.toLowerCase() ?? '';
+
+      if (role == 'caregiver') {
+        final partner = (d['linkedPartner'] as String?)?.trim() ?? '';
+        if (partner.isNotEmpty) return partner;
+        final list = (d['linkedReceivers'] as List?)?.cast<String>() ?? const <String>[];
+        if (list.isNotEmpty) return list.first;
+        return me.uid; // fallback
+      }
+
+      // receiver or unknown role -> self
+      return me.uid;
+    });
+  }
+
+  Future<String> _getTargetUserId() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return '';
+    final userRef = FirebaseFirestore.instance.collection('users').doc(me.uid);
+    final snap = await userRef.get(const GetOptions(source: Source.serverAndCache));
+    final d = snap.data() ?? {};
+    final role = (d['role'] as String?)?.toLowerCase() ?? '';
+
+    if (role == 'caregiver') {
+      final partner = (d['linkedPartner'] as String?)?.trim() ?? '';
+      if (partner.isNotEmpty) return partner;
+      final list = (d['linkedReceivers'] as List?)?.cast<String>() ?? const <String>[];
+      if (list.isNotEmpty) return list.first;
+      return me.uid; // fallback
+    }
+
+    // receiver or unknown role -> self
+    return me.uid;
+  }
+
+  bool _isScheduledForDay(Map<String, dynamic> m, DateTime day) {
+    final repeat = (m['repeat'] ?? 'Once') as String;
+    final dateStr = (m['date'] ?? '') as String;
+    final fmt = DateFormat('yyyy-MM-dd');
+
+    if (repeat == 'Daily') return true;
+    if (repeat == 'Weekly') {
+      if (dateStr.isEmpty) return false;
+      final d = fmt.parse(dateStr, true);
+      return d.weekday == day.weekday;
+    }
+    // Once (exact date match)
+    if (dateStr.isEmpty) return false;
+    return fmt.format(day) == dateStr;
+  }
+
 
 
   // ---------------- UI ----------------
@@ -990,7 +1350,11 @@ class _HomeContentState extends State<_HomeContent> {
                           children: [
                             Expanded(
                               child: _modernButton("Add Medication", Icons.add_circle_outline, onTap: () async {
-                                await Navigator.push(context, MaterialPageRoute(builder: (_) => const AddMedicationScreen()));
+                                final ownerId = await _getTargetUserId(); // active (receiver if caregiver has one)
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => AddMedicationScreen(ownerId: ownerId)),
+                                );
                               }),
                             ),
                             const SizedBox(width: 16),
@@ -1005,7 +1369,13 @@ class _HomeContentState extends State<_HomeContent> {
                         const Text("Today's Medications", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 15),
                         StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-                          stream: _getTodayMedicationsStream(),
+                          stream: _targetUidStream().asyncExpand((uid) {
+                            return FirebaseFirestore.instance
+                                .collection('users').doc(uid)
+                                .collection('medications')
+                                .snapshots()
+                                .map((s) => s.docs);
+                          }),
                           builder: (context, snapshot) {
                             if (!snapshot.hasData) {
                               return const Center(
@@ -1015,36 +1385,45 @@ class _HomeContentState extends State<_HomeContent> {
                                 ),
                               );
                             }
-                            final meds = snapshot.data!;
-                            if (meds.isEmpty) {
+                            final docs = snapshot.data!;
+                            final today = DateTime.now();
+
+// Convert to maps and filter like Calendar
+                            final medsForToday = docs.map((d) {
+                              final m = Map<String, dynamic>.from(d.data());
+                              m['id'] = d.id;
+                              m['owner'] = d.reference.parent.parent!.id;
+                              return m;
+                            }).where((m) => _isScheduledForDay(m, today)).toList();
+
+                            if (medsForToday.isEmpty) {
                               return const Center(
                                 child: Padding(
                                   padding: EdgeInsets.all(20),
-                                  child: Text("No medications added yet.",
-                                      style: TextStyle(color: Colors.grey, fontSize: 16)),
+                                  child: Text("No medications for today.", style: TextStyle(color: Colors.grey, fontSize: 16)),
                                 ),
                               );
                             }
+
                             return GridView.builder(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                crossAxisSpacing: 16,
-                                mainAxisSpacing: 16,
-                                childAspectRatio: 0.76,
+                                crossAxisCount: 2, crossAxisSpacing: 16, mainAxisSpacing: 16, childAspectRatio: 0.76,
                               ),
-                              itemCount: meds.length,
+                              itemCount: medsForToday.length,
                               itemBuilder: (context, index) {
-                                final data = meds[index].data();
+                                final m = medsForToday[index];
                                 return _modernMedicationCard({
-                                  'id': meds[index].id,
-                                  'owner': meds[index].reference.parent.parent!.id,
-                                  'name': data['name'] ?? 'Unknown',
-                                  'time': data['time'] ?? 'Unknown',
-                                  'taken': data['taken'] ?? false,
-                                  'remainingPills': data['remainingPills'],
-                                  'expiryDate': data['expiryDate'],
+                                  'id': m['id'],
+                                  'owner': m['owner'],
+                                  'name': m['name'] ?? 'Unknown',
+                                  'time': m['time'] ?? 'Unknown',
+                                  'taken': m['taken'] ?? false,
+                                  'remainingPills': m['remainingPills'],
+                                  'expiryDate': m['expiryDate'],
+                                  'repeat': m['repeat'],
+                                  'date': m['date'],
                                 });
                               },
                             );

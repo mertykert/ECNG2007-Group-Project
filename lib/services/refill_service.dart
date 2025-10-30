@@ -4,7 +4,7 @@ import 'notification_service.dart';
 class RefillService {
   static final _db = FirebaseFirestore.instance;
 
-  /// 🔹 Checks *all* medications for this user — used by midnight background job
+  ///  Checks *all* medications for this user — used by midnight background job
   static Future<void> checkAll(String uid) async {
     try {
       final meds = await _db
@@ -21,7 +21,7 @@ class RefillService {
     }
   }
 
-  /// 🔹 Check a single med — used by mark-as-taken flow
+  ///  Check a single med — used by mark-as-taken flow
   static Future<void> checkOne(String uid, String medId) async {
     final snap = await _db
         .collection('users')
@@ -33,7 +33,7 @@ class RefillService {
     await _checkOne(uid, medId, snap.data()!);
   }
 
-  /// 🔹 Called when a dose is marked “taken”
+  ///  Called when a dose is marked “taken”
   static Future<void> onDoseTaken(String uid, String medId,
       {int? perDose}) async {
     final ref =
@@ -54,7 +54,7 @@ class RefillService {
     await _checkOne(uid, medId, merged);
   }
 
-  /// 🔹 Core logic — decides if a notification or state change is needed
+  ///  Core logic — decides if a notification or state change is needed
   static Future<void> _checkOne(
       String uid, String medId, Map<String, dynamic> data) async {
     try {
@@ -76,7 +76,7 @@ class RefillService {
             .set({'remainingPills': remaining}, SetOptions(merge: true));
       }
 
-      // ✅ Trigger only when remaining <= 5 AND not already notified
+      //  Trigger only when remaining <= 5 AND not already notified
       final lowNotified = data['lowStockNotified'] == true;
       if (remaining <= 5 && !lowNotified) {
         await NotificationService.showNow(
@@ -91,7 +91,7 @@ class RefillService {
             .set({'lowStockNotified': true}, SetOptions(merge: true));
       }
 
-      // ✅ Reset notification flag once user refills above 5
+      //  Reset notification flag once user refills above 5
       if (remaining > 5 && lowNotified) {
         await _db
             .collection('users')
@@ -101,7 +101,7 @@ class RefillService {
             .set({'lowStockNotified': false}, SetOptions(merge: true));
       }
 
-      // ✅ Predict runout for daily/weekly schedules — schedule a reminder 3 days before
+      //  Predict runout for daily/weekly schedules — schedule a reminder 3 days before
       final repeat = (data['repeat'] ?? 'Once').toString();
       final dosesPerDay = repeat == 'Daily'
           ? 1.0

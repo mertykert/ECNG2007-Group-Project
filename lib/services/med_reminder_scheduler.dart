@@ -204,7 +204,7 @@ class MedReminderScheduler {
       if (kDebugMode) {
         final whenTxt = (repeat == 'Once' && !firstAt.isAfter(now)) ? '(skipped past once)' : '$when';
         print(
-            "✅ scheduled $medId →${reminderId != null ? ' reminderId=$reminderId' : ''}"
+            " scheduled $medId →${reminderId != null ? ' reminderId=$reminderId' : ''}"
                 "${expiryId != null ? ' expiryId=$expiryId' : ''} at $whenTxt ($repeat)"
         );
       }
