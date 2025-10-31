@@ -1007,26 +1007,49 @@ class _HomeContentState extends State<_HomeContent> {
       final prefs = await SharedPreferences.getInstance();
       final todayKey = 'lastAdjusted_$uid';
       final lastAdjusted = prefs.getString(todayKey);
-      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      if (lastAdjusted == today) return;
+      final today = DateUtils.dateOnly(DateTime.now());
+      final todayIso = DateFormat('yyyy-MM-dd').format(today);
+      if (lastAdjusted == todayIso) return;
 
-      final ref = FirebaseFirestore.instance.collection('users').doc(uid);
-      final meds = await ref.collection('medications').where('date', isEqualTo: today).get();
+      final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+      // ⚠️ Do NOT filter by date==today; this misses "Daily" meds.
+      final medsSnap = await userRef.collection('medications')
+      // .limit(500) // optional safety if dataset is large
+          .get(const GetOptions(source: Source.serverAndCache));
+
       final missedMeds = <Map<String, dynamic>>[];
 
-      for (final doc in meds.docs) {
+      for (final doc in medsSnap.docs) {
         final data = doc.data();
+        final med = {'id': doc.id, ...data};
+
+        // Only adjust those DUE today (Daily or Once today / Weekly today)
+        if (!_isScheduledForDay(med, today)) continue;
+
         final taken = data['taken'] == true;
-        final alreadyAdjusted = data['adjustedFor'] == today;
+        final alreadyAdjusted = (data['adjustedFor'] as String?) == todayIso;
 
         if (taken && !alreadyAdjusted) {
-          final perDose = (data['perDose'] ?? 1) as int;
-          final remaining = ((data['remainingPills'] ?? data['totalPills'] ?? 0) as int) - perDose;
+          final perDose   = (data['perDose'] ?? 1) as int;
+          final total     = (data['totalPills'] ?? 0) as int;
+          final remaining = (data['remainingPills'] ?? total) as int;
 
-          await doc.reference.update({
-            'remainingPills': remaining.clamp(0, 100000),
-            'adjustedFor': today,
+          final newRemaining = (remaining - perDose).clamp(0, 100000);
+
+          // 🔁 recompute refill fields right away (clears sticky badge)
+          final refillPatch = RefillService.computeRefillPatch({
+            'totalPills': total,
+            'remainingPills': newRemaining,
+            'refillThreshold': data['refillThreshold'],
           });
+
+          await doc.reference.set({
+            'remainingPills': newRemaining,
+            'adjustedFor': todayIso,
+            ...refillPatch,
+          }, SetOptions(merge: true));
+
+          // Keep background predictions/notifications consistent
           await RefillService.checkOne(uid, doc.id);
         } else if (!taken) {
           missedMeds.add({'name': data['name'], 'time': data['time']});
@@ -1034,14 +1057,15 @@ class _HomeContentState extends State<_HomeContent> {
       }
 
       if (missedMeds.isNotEmpty) {
-        await ref.collection('missed').doc(today).set({'meds': missedMeds});
+        await userRef.collection('missed').doc(todayIso).set({'meds': missedMeds});
       }
 
-      await prefs.setString(todayKey, today);
+      await prefs.setString(todayKey, todayIso);
     } catch (e) {
       debugPrint("⚠️ adjustDailyRemainingPills failed: $e");
     }
   }
+
 
   Future<void> debugListPendingNotifications() async {
     final plugin = FlutterLocalNotificationsPlugin();
@@ -1491,7 +1515,7 @@ class _HomeContentState extends State<_HomeContent> {
                             final docs = snapshot.data!;
                             final today = DateTime.now();
 
-// Convert to maps and filter like Calendar
+                            // Convert to maps and filter like Calendar
                             final medsForToday = docs.map((d) {
                               final m = Map<String, dynamic>.from(d.data());
                               m['id'] = d.id;

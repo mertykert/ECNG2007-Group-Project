@@ -462,6 +462,7 @@ class _MedicationFormState extends State<MedicationForm> {
     return ids;
   }
 
+  // Replace your _saveMedication() with this version (only diffs are the refill bits).
   Future<void> _saveMedication() async {
     final isValid = _formKey.currentState?.validate() ?? false;
     if (!isValid) return;
@@ -491,7 +492,7 @@ class _MedicationFormState extends State<MedicationForm> {
 
       if (widget.mode == MedicationFormMode.add) {
         // ---------- ADD ----------
-        final payload = <String, dynamic>{
+        final base = <String, dynamic>{
           'name': _nameCtrl.text.trim(),
           'dosage': _dosageCtrl.text.trim(),
           'time': timeStr,
@@ -505,13 +506,16 @@ class _MedicationFormState extends State<MedicationForm> {
           'expiryDate': _expiryCtrl.text.trim(),
           'totalPills': total,
           'perDose': perDose,
-          'remainingPills': total,
+          'remainingPills': total,    // start full
           'lowStockNotified': false,
         };
 
+        // ✅ compute & merge refill fields (needsRefill, threshold, etc.)
+        final payload = {...base, ...RefillService.computeRefillPatch(base)};
+
         final medRef = await userRef.collection('medications').add(payload);
 
-        // 👉 single source of truth: scheduler writes notificationIds
+        // Single source of truth for alarms
         await MedReminderScheduler.scheduleForMed(
           uid: ownerId,
           medId: medRef.id,
@@ -551,10 +555,23 @@ class _MedicationFormState extends State<MedicationForm> {
         }
         final old = snap.data()!;
 
-        // ❌ no "deleted" popup on save: silent cancel of timers
+        // Cancel previous timers before re-schedule
         await MedReminderScheduler.cancelTimersForMed(ownerId, widget.medId!);
 
-        final update = <String, dynamic>{
+        final oldTotal = (old['totalPills'] ?? 0) as int;
+        final oldRemaining = (old['remainingPills'] ?? oldTotal) as int;
+        final newTotal = int.tryParse(_totalCtrl.text.trim()) ?? oldTotal;
+
+        // ✅ If total increased, treat as a refill: reset remaining to newTotal.
+        // Else clamp remaining within [0, newTotal].
+        int newRemaining;
+        if (newTotal > oldTotal) {
+          newRemaining = newTotal;
+        } else {
+          newRemaining = oldRemaining.clamp(0, newTotal);
+        }
+
+        final baseUpdate = <String, dynamic>{
           'name': _nameCtrl.text.trim(),
           'dosage': _dosageCtrl.text.trim(),
           'time': timeStr,
@@ -564,14 +581,23 @@ class _MedicationFormState extends State<MedicationForm> {
           'date': dateStr,
           'ownerUid': ownerId,
           'expiryDate': _expiryCtrl.text.trim(),
-          'totalPills': int.tryParse(_totalCtrl.text.trim()) ?? (old['totalPills'] ?? 0),
+          'totalPills': newTotal,
           'perDose': perDose,
-          'lowStockNotified': old['lowStockNotified'] ?? false,
+          'remainingPills': newRemaining,
+          // do not blindly carry old lowStockNotified; compute again below
           'updatedAt': FieldValue.serverTimestamp(),
         };
-        await docRef.set(update, SetOptions(merge: true));
 
-        // Re-schedule (single path)
+        // ✅ recompute refill fields from new totals/remaining
+        final refillPatch = RefillService.computeRefillPatch({
+          'totalPills': newTotal,
+          'remainingPills': newRemaining,
+          'refillThreshold': old['refillThreshold'],
+        });
+
+        await docRef.set({...baseUpdate, ...refillPatch}, SetOptions(merge: true));
+
+        // Re-schedule with new time/repeat
         await MedReminderScheduler.scheduleForMed(
           uid: ownerId,
           medId: widget.medId!,
