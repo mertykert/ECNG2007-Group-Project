@@ -5,6 +5,8 @@ import 'package:medi_care/widgets/back_button_overlay.dart';
 import 'package:medi_care/widgets/show_message.dart'; //  import modern toast helper
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../analytics/analytics_service.dart';
+
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -72,6 +74,15 @@ class _SignInScreenState extends State<SignInScreen> {
           icon: Icons.check_circle_outline,
           color: Colors.greenAccent,
         );
+        final uid = FirebaseAuth.instance.currentUser!.uid;
+        // read role from Firestore if you have it
+        final snap = await FirebaseFirestore.instance.collection('users').doc(uid)
+            .get(const GetOptions(source: Source.serverAndCache));
+        final role = (snap.data()?['role'] as String?)?.toLowerCase();
+
+        await AppAnalytics.identifyUser(uid: uid, role: role);
+        await AppAnalytics.logSignIn(method: 'password');   // in signin
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedInOnce', true);
       } on FirebaseAuthException catch (e) {

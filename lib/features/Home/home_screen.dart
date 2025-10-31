@@ -14,6 +14,7 @@ import 'package:medi_care/features/Medication/edit_medication.dart';
 import 'package:medi_care/widgets/link_partner_dialog.dart';
 import 'package:medi_care/widgets/app_snackbars.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../analytics/analytics_service.dart';
 import '../../services/med_reminder_scheduler.dart';
 import '../../services/refill_service.dart';
 import '../../services/notification_service.dart';
@@ -341,7 +342,11 @@ class _AppDrawerState extends State<_AppDrawer> {
       });
       await _refreshLinkInfo();      // reloads names/ids
       await _loadLinkedReceiversList(); // repopulates caregiver list
-
+      final removedUid = linkedPartnerId;            // cache current active partner id
+      await partner_service.unlinkActivePartner();   // still returns void
+      if (removedUid != null && removedUid!.isNotEmpty) {
+        await AppAnalytics.logPartnerUnlinked(partnerUid: removedUid!);
+      }
       await _showToast(title: 'Partner unlinked', success: true);
     } catch (e) {
       if (!mounted) return;
@@ -466,6 +471,8 @@ class _AppDrawerState extends State<_AppDrawer> {
                           await partner_service.switchActiveReceiver(sel);
                           await _refreshLinkInfo();
                           if (!mounted) return;
+                          await partner_service.switchActiveReceiver(sel);
+                          await AppAnalytics.logReceiverSwitched(receiverUid: sel);
                           Navigator.pop(ctx);
                           await _showInfoDialog('Done', 'Active care receiver switched.');
                         } catch (e) {
@@ -511,6 +518,8 @@ class _AppDrawerState extends State<_AppDrawer> {
       await partner_service.linkReceiverByCode(code.trim());
       await _refreshLinkInfo();    // your existing refresh method
       if (!mounted) return;
+      final receiverUid = await partner_service.linkReceiverByCode(code);
+      await AppAnalytics.logPartnerLinked(receiverUid: receiverUid);
       await _showToast(title: 'Linked successfully');
       await _refreshLinkInfo();
       await _loadLinkedReceiversList();
@@ -1055,6 +1064,56 @@ class _HomeContentState extends State<_HomeContent> {
     } catch (_) {}
   }
 
+  Future<void> _showToast({
+    required String title,
+    String? message,
+    bool success = true,
+  }) async {
+    const blue = Color(0xFF2d59f0);
+    final bg = success ? blue : Colors.redAccent;
+    final fg = Colors.white;
+
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          elevation: 2,
+          backgroundColor: bg,
+          margin: const EdgeInsets.all(14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(success ? Icons.check_circle_rounded : Icons.error_outline_rounded, color: fg),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: TextStyle(
+                          color: fg,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          letterSpacing: .2,
+                        )),
+                    if (message != null && message.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(message, style: const TextStyle(color: Colors.black87)),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
   Future<bool> _deleteMedication(String ownerId, String id) async {
     final userRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
     final medSnap = await userRef.collection('medications').doc(id).get();
@@ -1069,12 +1128,19 @@ class _HomeContentState extends State<_HomeContent> {
 
     await medSnap.reference.delete();
 
+    // 2) Local cache delete (safe even if offline cache missing)
     final todayDel = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    await OfflineService.deleteTodayMedById(ownerId, todayDel, id);
+    try {
+      await OfflineService.deleteTodayMedById(ownerId, todayDel, id);
+    } catch (_) {
+      // ignore cache errors; remote succeeded
+    }
+
+    await _showToast(title: 'Medication deleted');
 
     if (mounted) {
-      showMedicationDeletedSuccess(context, name: name);
       setState(() {});
+      showMedicationDeletedSuccess(context, name: name);
     }
     return true;
   }

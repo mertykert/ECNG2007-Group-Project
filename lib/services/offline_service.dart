@@ -97,12 +97,18 @@ class OfflineService {
     await b.put(todayMedsKey(ownerId, date), list);
   }
 
-  static Future<void> deleteTodayMedById(String ownerId, String date, String id) async {
-    final b = _meds;
-    if (b == null) return;
-    final key = todayMedsKey(ownerId, date);
-    final list = loadTodayMeds(ownerId, date);
-    list.removeWhere((m) => (m['id']?.toString() ?? '') == id);
-    await b.put(key, list);
+  static Future<void> deleteTodayMedById(String ownerUid, String dayIso, String medId) async {
+    final box = Hive.box('scheduled_reminders'); // or your meds cache box if different
+    final key = 'today_$ownerUid\_$dayIso';
+
+    final raw = box.get(key);
+    // Always materialize to a mutable List<Map>
+    final List<Map<String, dynamic>> list = (raw is List)
+        ? raw.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList()
+        : <Map<String, dynamic>>[];
+
+    list.removeWhere((m) => (m['id'] as String?) == medId);
+
+    await box.put(key, list);
   }
 }

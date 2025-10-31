@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
 import 'package:medi_care/widgets/back_button_overlay.dart';
+import '../../analytics/analytics_service.dart';
 import '../../services/med_reminder_scheduler.dart';
 import '../../services/refill_service.dart';
 import '../../widgets/app_snackbars.dart';
@@ -122,6 +123,12 @@ class _SchedulePageState extends State<SchedulePage> {
       }
       final medData = medSnap.data()!;
       final newStatus = !current;
+
+      await AppAnalytics.logMedicationTaken(
+        ownerUid: ownerId,
+        medId: id,
+        taken: newStatus,
+      );
 
       // Per-day taken log
       await medRef.update({

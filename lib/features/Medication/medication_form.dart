@@ -9,6 +9,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:medi_care/services/med_reminder_scheduler.dart';
+import '../../analytics/analytics_service.dart';
 import '../../widgets/back_button_overlay.dart';
 import '../../services/notification_service.dart';
 import '../../services/refill_service.dart';
@@ -527,6 +528,10 @@ class _MedicationFormState extends State<MedicationForm> {
         await RefillService.checkOne(ownerId, medRef.id);
 
         if (!mounted) return;
+        await AppAnalytics.logMedicationAdded(
+          ownerUid: ownerId,
+          repeat: (payload['repeat'] as String?) ?? 'Once',
+        );
         _showOk("Medication added successfully!");
         if (Navigator.canPop(context)) Navigator.pop(context, true);
 

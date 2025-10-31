@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:medi_care/widgets/show_message.dart'; // import modern message helper
 import 'dart:math';
 
+import '../../../../analytics/analytics_service.dart';
 import '../../../../widgets/back_button_overlay.dart';
 
 
@@ -94,6 +95,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
             icon: Icons.mark_email_read_outlined,
             color: Colors.greenAccent,
           );
+
+          final uid = FirebaseAuth.instance.currentUser!.uid;
+          // read role from Firestore if you have it
+          final snap = await FirebaseFirestore.instance.collection('users').doc(uid)
+              .get(const GetOptions(source: Source.serverAndCache));
+          final role = (snap.data()?['role'] as String?)?.toLowerCase();
+
+          await AppAnalytics.identifyUser(uid: uid, role: role);
+          await AppAnalytics.logSignUp(method: 'password');   // in signup
 
           //  Show dialog with partner code
           await showDialog(

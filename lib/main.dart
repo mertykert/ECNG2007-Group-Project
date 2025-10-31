@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_analytics/observer.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -25,6 +27,8 @@ import 'features/authentication/screens/signin/signin.dart';
 import 'features/Calendar/calendar.dart';
 import 'features/role_based_account_selection/profiles/profile_selection.dart';
 import 'features/Home/home_screen.dart';
+
+late final FirebaseAnalytics analytics;
 
 Future<void> checkPermissions() async {
   final notif = await Permission.notification.status;
@@ -118,6 +122,11 @@ Future<void> main() async {
     // 1) Core SDKs
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+    analytics = FirebaseAnalytics.instance;
+
+    // (Optional) Disable collection until user consents:
+     await analytics.setAnalyticsCollectionEnabled(true);
+
     // 2) Firestore offline-first
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
@@ -192,6 +201,9 @@ class MyApp extends StatelessWidget {
         title: "Medi_Care",
         theme: ThemeData(primarySwatch: Colors.blue),
         home: const WelcomeScreen(),
+        navigatorObservers: [
+          FirebaseAnalyticsObserver(analytics: analytics),
+        ],
         routes: {
           "/welcome": (context) => const WelcomeScreen(),
           "/signup": (context) => const SignUpScreen(),
