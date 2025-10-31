@@ -1145,6 +1145,42 @@ class _HomeContentState extends State<_HomeContent> {
     return true;
   }
 
+  // ================== DROP-IN HELPERS (put in the same State as your loaders) ==================
+
+  bool _wasTakenOn(Map<String, dynamic> m, DateTime day) {
+    final key = DateUtils.dateOnly(day).toIso8601String().substring(0, 10);
+
+    // 1) Preferred: takenByDate: { 'yyyy-MM-dd': true/false }
+    final Map<String, dynamic>? byDate = (m['takenByDate'] as Map?)?.cast<String, dynamic>();
+    if (byDate != null) {
+      final v = byDate[key];
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+    }
+
+    // 2) Or: takenDates: ['yyyy-MM-dd', ...]
+    final List<dynamic>? dates = m['takenDates'] as List<dynamic>?;
+    if (dates != null && dates.any((e) => (e as String?) == key)) {
+      return true;
+    }
+
+    // 3) Or: lastTakenDate: 'yyyy-MM-dd'
+    final String? last = (m['lastTakenDate'] as String?);
+    if (last != null && last == key) return true;
+
+    // 4) Legacy fallback: a plain 'taken' bool only counts if the med instance is for that date
+    // (handles ONCE meds or models where 'date' marks the instance day)
+    final bool taken = (m['taken'] as bool?) ?? false;
+    final String? instanceDate = m['date'] as String?;
+    if (taken && instanceDate == key) return true;
+
+    return false;
+  }
+
+// You already have _isScheduledForDay(m, day). Keep using it.
+
+// ================== REPLACE your TWO LOADERS with these versions ==================
+
   Future<void> _loadTodayProgress(String targetUid) async {
     try {
       final snap = await FirebaseFirestore.instance
@@ -1154,34 +1190,31 @@ class _HomeContentState extends State<_HomeContent> {
           .get();
 
       final today = DateTime.now();
-      final todays = snap.docs.map((d) {
-        final m = Map<String, dynamic>.from(d.data());
-        m['id'] = d.id;
-        return m;
-      }).where((m) => _isScheduledForDay(m, today)).toList();
+      final todayIso = DateFormat('yyyy-MM-dd').format(today);
+
+      final todays = snap.docs
+          .map((d) => {'id': d.id, ...Map<String, dynamic>.from(d.data())})
+          .where((m) => _isScheduledForDay(m, today))
+          .toList();
 
       if (todays.isEmpty) {
         _todayProgressNotifier.value = 0.0;
-        await OfflineService.saveTodayProgress(targetUid, DateFormat('yyyy-MM-dd').format(today), 0.0);
-      } else {
-        final total = todays.length;
-        final taken = todays.where((m) => m['taken'] == true).length;
-        final ratio = total == 0 ? 0.0 : taken / total;
-        _todayProgressNotifier.value = ratio;
-        await OfflineService.saveTodayProgress(
-          targetUid, DateFormat('yyyy-MM-dd').format(today), ratio,
-        );
-
-        // optional: cache list for offline
-        await OfflineService.saveTodayMeds(
-          targetUid,
-          DateFormat('yyyy-MM-dd').format(today),
-          todays,
-        );
+        await OfflineService.saveTodayProgress(targetUid, todayIso, 0.0);
+        await OfflineService.saveTodayMeds(targetUid, todayIso, const []);
+        return;
       }
+
+      final total = todays.length;
+      final taken = todays.where((m) => _wasTakenOn(m, today)).length;
+      final ratio = total == 0 ? 0.0 : taken / total;
+
+      _todayProgressNotifier.value = ratio;
+      await OfflineService.saveTodayProgress(targetUid, todayIso, ratio);
+      await OfflineService.saveTodayMeds(targetUid, todayIso, todays);
+
     } catch (_) {
-      final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final cached = OfflineService.loadTodayProgress(targetUid, todayStr);
+      final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final cached = OfflineService.loadTodayProgress(targetUid, todayIso);
       if (cached != null) _todayProgressNotifier.value = cached;
     }
   }
@@ -1189,12 +1222,15 @@ class _HomeContentState extends State<_HomeContent> {
   Future<void> _loadWeeklyProgress(String targetUid) async {
     if (!mounted) return;
     try {
-      final users = FirebaseFirestore.instance.collection('users');
-      final all = await users.doc(targetUid).collection('medications').get();
-      final meds = all.docs.map((d) => Map<String, dynamic>.from(d.data())).toList();
+      final all = await FirebaseFirestore.instance
+          .collection('users').doc(targetUid)
+          .collection('medications')
+          .get();
+
+      final meds = all.docs.map((d) => {'id': d.id, ...Map<String, dynamic>.from(d.data())}).toList();
 
       final now = DateTime.now();
-      final start = now.subtract(Duration(days: now.weekday - 1));
+      final start = now.subtract(Duration(days: now.weekday - 1)); // Monday
       final progress = <double>[];
 
       for (int i = 0; i < 7; i++) {
@@ -1204,7 +1240,7 @@ class _HomeContentState extends State<_HomeContent> {
           progress.add(0.0);
         } else {
           final total = todays.length;
-          final taken = todays.where((m) => m['taken'] == true).length;
+          final taken = todays.where((m) => _wasTakenOn(m, day)).length;
           progress.add(taken / total);
         }
       }
@@ -1222,6 +1258,7 @@ class _HomeContentState extends State<_HomeContent> {
       if (cached != null && mounted) weeklyProgressNotifier.value = cached;
     }
   }
+
 
   Future<void> _showInfoDialog(String title, String message) async {
     const blue = Color(0xFF2d59f0);
@@ -1591,6 +1628,25 @@ class _HomeContentState extends State<_HomeContent> {
         );
       },
     );
+  }
+
+  bool _isDueOn(Map<String, dynamic> m, DateTime day) {
+    final repeat = (m['repeat'] as String? ?? '').toLowerCase(); // 'daily'|'weekly'|'once'
+    if (repeat == 'daily') return true;
+
+    if (repeat == 'weekly') {
+      final int? dow = (m['weekday'] as int?); // 1=Mon..7=Sun (adjust to your schema)
+      final int dayDow = (day.weekday);        // 1..7
+      return dow != null && dow == dayDow;
+    }
+
+    if (repeat == 'once') {
+      final String? iso = (m['date'] as String?); // 'yyyy-MM-dd'
+      final String dIso = DateUtils.dateOnly(day).toIso8601String().substring(0, 10);
+      return iso != null && iso == dIso;
+    }
+
+    return false;
   }
 
   Widget _buildTodayTakenMeter() { /* … exactly as you posted … */

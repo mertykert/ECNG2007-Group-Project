@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
@@ -21,6 +22,59 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   late final Animation<Offset> _slideAnimation;
   late final Future<LottieComposition> _dnaComposition;
   final _titleGroup = AutoSizeGroup();
+
+  bool _busy = false;
+
+  Future<bool> _hasNetwork() async {
+    final r = await Connectivity().checkConnectivity();
+    return r.contains(ConnectivityResult.mobile) || r.contains(ConnectivityResult.wifi);
+  }
+
+  Future<void> _openOfflineIfPossible() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _snack('No offline session found. Connect once to sign in.');
+      return;
+    }
+    try {
+      // warm from cache (no throw if offline)
+      await FirebaseFirestore.instance
+          .collection('users').doc(user.uid)
+          .get(const GetOptions(source: Source.cache));
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/HomeScreen');
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _handleWelcomeSignInPressed() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final online = await _hasNetwork();
+
+      // IMPORTANT: do NOT call currentUser.reload() when offline.
+      // (This was causing your exception in the stack trace.)
+      if (!online) {
+        await _openOfflineIfPossible();
+        return;
+      }
+
+      // If online, navigate to the real Sign In screen
+      if (!mounted) return;
+      Navigator.pushNamed(context, '/signin');
+    } catch (e) {
+      _snack(e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
 
   @override
@@ -209,32 +263,59 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             iconColor: Colors.black,
                             onTap: () async {
                               final prefs = await SharedPreferences.getInstance();
-                              final user = FirebaseAuth.instance.currentUser;
                               final wasLoggedInOnce = prefs.getBool('isLoggedInOnce') ?? false;
+                              final user = FirebaseAuth.instance.currentUser;
 
-                              if (user != null && wasLoggedInOnce) {
-                                await user.reload();
-                                final refreshedUser = FirebaseAuth.instance.currentUser;
+                              // Detect connectivity
+                              final conn = await Connectivity().checkConnectivity();
+                              final online = conn.contains(ConnectivityResult.mobile) || conn.contains(ConnectivityResult.wifi);
 
-                                if (refreshedUser != null && refreshedUser.emailVerified) {
-                                  final doc = await FirebaseFirestore.instance
-                                      .collection('users')
-                                      .doc(refreshedUser.uid)
-                                      .get();
-
-                                  if (doc.exists && doc.data()?['role'] == 'caregiver') {
-                                    Navigator.pushReplacementNamed(context, '/HomeScreen');
-                                  } else if (doc.exists && doc.data()?['role'] == 'receiver') {
-                                    Navigator.pushReplacementNamed(context, '/HomeScreen');
-                                  } else {
-                                    Navigator.pushReplacementNamed(context, '/profileSelect');
-                                  }
-                                  return;
+                              if (!online) {
+                                // OFFLINE: allow entry only if there is a cached session
+                                if (user != null && wasLoggedInOnce) {
+                                  // Warm cache (no network)
+                                  try {
+                                    await FirebaseFirestore.instance
+                                        .collection('users').doc(user.uid)
+                                        .get(const GetOptions(source: Source.cache));
+                                  } catch (_) {}
+                                  if (!context.mounted) return;
+                                  Navigator.pushReplacementNamed(context, '/HomeScreen');
                                 } else {
-                                  await FirebaseAuth.instance.signOut();
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('No offline session found. Connect to the internet to sign in once.')),
+                                  );
                                 }
+                                return;
                               }
 
+                              // ONLINE: keep your original logic, but guard reload with try/catch
+                              try {
+                                await user?.reload();
+                              } catch (_) {
+                                // ignore transient reload errors
+                              }
+                              final refreshedUser = FirebaseAuth.instance.currentUser;
+
+                              if (refreshedUser != null && (refreshedUser.emailVerified)) {
+                                final doc = await FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(refreshedUser.uid)
+                                    .get(const GetOptions(source: Source.serverAndCache));
+
+                                if (!context.mounted) return;
+                                final role = (doc.data()?['role'] as String?)?.toLowerCase();
+                                if (role == 'caregiver' || role == 'receiver') {
+                                  Navigator.pushReplacementNamed(context, '/HomeScreen');
+                                } else {
+                                  Navigator.pushReplacementNamed(context, '/profileSelect');
+                                }
+                                return;
+                              }
+
+                              // No current user or not verified → go to Sign In screen online
+                              if (!context.mounted) return;
                               Navigator.pushNamed(context, '/signin');
                             },
                           ),

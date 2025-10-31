@@ -10,6 +10,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_analytics/observer.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:medi_care/services/offline_service.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -149,28 +150,69 @@ Future<void> main() async {
     await checkPermissions();
     await Workmanager().initialize(callbackDispatcher, isInDebugMode: kDebugMode);
 
-    // 5) Restore scheduled reminders from local backup (guard uid)
-    final reminderBox = Hive.box('scheduled_reminders');
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    if (currentUid.isNotEmpty) {
-      for (final entry in reminderBox.toMap().entries) {
-        final medId = entry.key as String;
-        final data = Map<String, dynamic>.from(entry.value);
-        // Only restore reminders that belong to this uid (safety)
+    // Restore scheduled reminders from local backup (guard uid)
+    Future<void> _restoreScheduledRemindersForCurrentUser() async {
+      final box = Hive.box('scheduled_reminders');
+      final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+      if (currentUid.isEmpty) return;
+
+      int scanned = 0, restored = 0, skipped = 0;
+
+      Future<bool> _tryRestoreOne(Map<dynamic, dynamic> raw, {required String fallbackMedId}) async {
+        final data = Map<String, dynamic>.from(raw); // ensure String keys
         final ownerUid = (data['uid'] as String?) ?? currentUid;
-        if (ownerUid == currentUid) {
+        if (ownerUid != currentUid) return false;
+
+        final medId = (data['medId'] as String?) ?? fallbackMedId;
+        try {
           await MedReminderScheduler.scheduleForMed(
             uid: ownerUid,
             medId: medId,
             medData: data,
           );
+          return true;
+        } catch (e, st) {
+          if (kDebugMode) debugPrint("⚠️ Restore failed for medId=$medId: $e\n$st");
+          return false;
         }
       }
+
+      final map = box.toMap();
+      for (final entry in map.entries) {
+        scanned++;
+        final keyStr = entry.key.toString();
+        final v = entry.value;
+
+        if (v is Map) {
+          final ok = await _tryRestoreOne(v, fallbackMedId: keyStr);
+          if (ok) restored++; else skipped++;
+        } else if (v is List) {
+          for (final item in v) {
+            if (item is Map) {
+              final ok = await _tryRestoreOne(item, fallbackMedId: (item['medId']?.toString() ?? keyStr));
+              if (ok) restored++; else skipped++;
+            } else {
+              skipped++;
+            }
+          }
+        } else {
+          skipped++;
+        }
+      }
+
       if (kDebugMode) {
-        print("🔁 Restored ${reminderBox.length} medication reminders on startup for $currentUid");
+        debugPrint("🔁 Restored $restored / scanned $scanned reminders (skipped $skipped) for $currentUid");
         await NotificationService.dumpPending();
       }
     }
+
+    final reminderBox = Hive.box('scheduled_reminders');
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (currentUid.isNotEmpty) {
+      await _restoreScheduledRemindersForCurrentUser(); // ← use helper (do NOT keep old loop)
+    }
+
+    await OfflineService.init();
 
     // 6) Auth-driven background tasks
     FirebaseAuth.instance.authStateChanges().listen((user) async {

@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -21,103 +22,148 @@ class _SignInScreenState extends State<SignInScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _obscurePassword = true;
 
+  Future<bool> _hasNetwork() async {
+    final r = await Connectivity().checkConnectivity();
+    return r.contains(ConnectivityResult.mobile) || r.contains(ConnectivityResult.wifi);
+  }
+
+  Future<bool> _hasOfflineSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final wasLoggedInOnce = prefs.getBool('isLoggedInOnce') ?? false;
+    return FirebaseAuth.instance.currentUser != null && wasLoggedInOnce;
+  }
+
+  void _snack(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   Future<void> _signIn() async {
-    if (_formKey.currentState!.validate()) {
-      await showMessage(
-        context,
-        message: "Signing in...",
-        icon: Icons.login_rounded,
-        color: Colors.blueAccent,
-      );
+    if (!_formKey.currentState!.validate()) return;
 
-      try {
-        // Sign in the user
-        UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
+    await showMessage(
+      context,
+      message: "Signing in...",
+      icon: Icons.login_rounded,
+      color: Colors.blueAccent,
+    );
 
-        final currentUser = userCredential.user;
+    final online = await _hasNetwork();
 
-        // Check if email is verified
-        if (currentUser != null && !currentUser.emailVerified) {
-          await FirebaseAuth.instance.signOut();
-
-          await showMessage(
-            context,
-            message: "Please verify your email before logging in.",
-            icon: Icons.warning_amber_rounded,
-            color: Colors.orangeAccent,
-          );
-          return;
-        }
-
-        // Fetch role from Firestore
-        if (currentUser != null) {
-          final doc = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUser.uid)
-              .get();
-
-          if (doc.exists && doc.data()?['role'] == 'caregiver') {
-            Navigator.pushReplacementNamed(context, '/HomeScreen');
-          } else if (doc.exists && doc.data()?['role'] == 'receiver') {
-            Navigator.pushReplacementNamed(context, '/HomeScreen');
-          } else {
-            Navigator.pushReplacementNamed(context, '/profileSelect');
-          }
-        }
-
+    // =========================
+    // OFFLINE PATH (no network)
+    // =========================
+    if (!online) {
+      if (await _hasOfflineSession()) {
+        // Do NOT call reload() or any online calls here.
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, '/HomeScreen');
+      } else {
         await showMessage(
           context,
-          message: "Login successful!",
-          icon: Icons.check_circle_outline,
-          color: Colors.greenAccent,
-        );
-        final uid = FirebaseAuth.instance.currentUser!.uid;
-        // read role from Firestore if you have it
-        final snap = await FirebaseFirestore.instance.collection('users').doc(uid)
-            .get(const GetOptions(source: Source.serverAndCache));
-        final role = (snap.data()?['role'] as String?)?.toLowerCase();
-
-        await AppAnalytics.identifyUser(uid: uid, role: role);
-        await AppAnalytics.logSignIn(method: 'password');   // in signin
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('isLoggedInOnce', true);
-      } on FirebaseAuthException catch (e) {
-        String message;
-        switch (e.code) {
-          case 'user-not-found':
-            message = 'No account found for this email.';
-            break;
-          case 'wrong-password':
-            message = 'Incorrect password. Please try again.';
-            break;
-          case 'invalid-email':
-            message = 'Invalid email format.';
-            break;
-          case 'network-request-failed':
-            message = 'No internet connection. Try again later.';
-            break;
-          default:
-            message = 'Login failed. Please try again.';
-        }
-
-        await showMessage(
-          context,
-          message: message,
-          icon: Icons.error_outline,
-          color: Colors.redAccent,
-        );
-      } catch (e) {
-        await showMessage(
-          context,
-          message: "Unexpected error: $e",
-          icon: Icons.error_outline,
-          color: Colors.redAccent,
+          message: "No offline session found. Connect to the internet to sign in once.",
+          icon: Icons.offline_bolt_rounded,
+          color: Colors.orangeAccent,
         );
       }
+      return;
+    }
+
+    // =========================
+    // ONLINE PATH
+    // =========================
+    try {
+      // Sign in the user
+      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+      final currentUser = cred.user;
+
+      // Email verification (only enforce online)
+      if (currentUser != null && !currentUser.emailVerified) {
+        await FirebaseAuth.instance.signOut();
+        await showMessage(
+          context,
+          message: "Please verify your email before logging in.",
+          icon: Icons.warning_amber_rounded,
+          color: Colors.orangeAccent,
+        );
+        return;
+      }
+
+      // Fetch role (server+cache so it works even if network hiccups now)
+      String? role;
+      if (currentUser != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUser.uid)
+            .get(const GetOptions(source: Source.serverAndCache));
+        role = (doc.data()?['role'] as String?)?.toLowerCase();
+      }
+
+      // Navigate
+      if (!mounted) return;
+      if (role == 'caregiver' || role == 'receiver') {
+        Navigator.pushReplacementNamed(context, '/HomeScreen');
+      } else {
+        Navigator.pushReplacementNamed(context, '/profileSelect');
+      }
+
+      // Success toast
+      await showMessage(
+        context,
+        message: "Login successful!",
+        icon: Icons.check_circle_outline,
+        color: Colors.greenAccent,
+      );
+
+      // Analytics (online)
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get(const GetOptions(source: Source.serverAndCache));
+      final roleForAnalytics = (snap.data()?['role'] as String?)?.toLowerCase();
+      await AppAnalytics.identifyUser(uid: uid, role: roleForAnalytics);
+      await AppAnalytics.logSignIn(method: 'password');
+
+      // Mark that the device has logged in at least once (enables offline open)
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isLoggedInOnce', true);
+
+    } on FirebaseAuthException catch (e) {
+      String message;
+      switch (e.code) {
+        case 'user-not-found':
+          message = 'No account found for this email.';
+          break;
+        case 'wrong-password':
+          message = 'Incorrect password. Please try again.';
+          break;
+        case 'invalid-email':
+          message = 'Invalid email format.';
+          break;
+        case 'network-request-failed':
+          message = 'Network error. Check your connection and try again.';
+          break;
+        default:
+          message = 'Login failed. Please try again.';
+      }
+      await showMessage(
+        context,
+        message: message,
+        icon: Icons.error_outline,
+        color: Colors.redAccent,
+      );
+    } catch (e) {
+      await showMessage(
+        context,
+        message: "Unexpected error: $e",
+        icon: Icons.error_outline,
+        color: Colors.redAccent,
+      );
     }
   }
 
