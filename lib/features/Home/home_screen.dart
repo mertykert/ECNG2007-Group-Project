@@ -26,8 +26,6 @@ import 'package:medi_care/services/partner_service.dart' as partner_service;
 // small enum for the popup menu (must be top-level)
 enum _MedAction { edit, delete }
 
-
-
 // ---------------------------------------------------------------------------
 // Shell: uses the fancy drawer and hosts your unchanged screen logic/content.
 // ---------------------------------------------------------------------------
@@ -970,33 +968,62 @@ class _HomeContentState extends State<_HomeContent> {
 
 
   Future<void> _markAsTaken(String ownerId, String id, bool currentStatus) async {
-    final userRef = FirebaseFirestore.instance.collection('users').doc(ownerId);
-    final medSnap = await userRef.collection('medications').doc(id).get();
+    final medRef = FirebaseFirestore.instance
+        .collection('users').doc(ownerId)
+        .collection('medications').doc(id);
+
+    final medSnap = await medRef.get();
     if (!medSnap.exists) return;
-
     final medData = medSnap.data()!;
-    final newStatus = !currentStatus;
 
-    await medSnap.reference.update({'taken': newStatus});
+    final String todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final bool   newStatus = !currentStatus;
 
-    if (newStatus) {
-      final perDose = (medData['perDose'] ?? 1) as int;
-      final remaining = ((medData['remainingPills'] ?? medData['totalPills'] ?? 0) as int) - perDose;
-      await medSnap.reference.update({'remainingPills': remaining.clamp(0, 100000)});
-      await RefillService.checkOne(ownerId, id);
+// 1) Write scalar + per-day flag for TODAY
+    await medRef.update({
+      'taken': newStatus,
+      'takenByDate.$todayIso': newStatus,
+    });
+
+// 2) Symmetric stock math for TODAY
+    final bool isToday = true; // we’re toggling from “Today’s Meds” section
+    if (isToday) {
+      final int perDose   = (medData['perDose'] ?? 1) as int;
+      final int total     = (medData['totalPills'] ?? 0) as int;
+      final int remaining = (medData['remainingPills'] ?? total) as int;
+
+      final int delta        = newStatus ? -perDose : perDose;  // taken→subtract, undo→add back
+      final int newRemaining = (remaining + delta).clamp(0, 100000);
+
+      await medRef.update({'remainingPills': newRemaining});
+
+      await medRef.set(
+        RefillService.computeRefillPatch({
+          'totalPills': total,
+          'remainingPills': newRemaining,
+          'refillThreshold': medData['refillThreshold'],
+        }),
+        SetOptions(merge: true),
+      );
+
+      // If you write to offline cache here, make sure to use newRemaining
+      final today = todayIso;
+      await OfflineService.upsertTodayMed(ownerId, today, {
+        'id': id,
+        'owner': ownerId,
+        'name': medData['name'],
+        'time': medData['time'],
+        'date': medData['date'],
+        'taken': newStatus,
+        'remainingPills': newRemaining, // <-- critical: use updated value
+        'expiryDate': medData['expiryDate'],
+      });
     }
 
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    await OfflineService.upsertTodayMed(ownerId, today, {
-      'id': id,
-      'owner': ownerId,
-      'name': medData['name'],
-      'time': medData['time'],
-      'date': medData['date'],
-      'taken': newStatus,
-      'remainingPills': (medData['remainingPills'] ?? medData['totalPills']),
-      'expiryDate': medData['expiryDate'],
-    });
+    // analytics
+    await AppAnalytics.logMedicationTaken(ownerUid: ownerId, medId: id, taken: newStatus);
+
+    await RefillService.checkOne(ownerId, id);
 
     _loadTodayProgress(ownerId);
     if (mounted) setState(() {});
@@ -1365,6 +1392,15 @@ class _HomeContentState extends State<_HomeContent> {
     return me.uid;
   }
 
+  bool isTakenOn(Map<String, dynamic> m, DateTime day) {
+    final iso = DateUtils.dateOnly(day).toIso8601String().substring(0, 10);
+    final byDate = (m['takenByDate'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final v = byDate[iso];
+    if (v == true || (v is num && v != 0)) return true;
+    if ((m['date'] as String?) == iso && (m['taken'] == true)) return true; // once-med fallback
+    return false;
+  }
+
   bool _isScheduledForDay(Map<String, dynamic> m, DateTime day) {
     final repeat = (m['repeat'] ?? 'Once') as String;
     final dateStr = (m['date'] ?? '') as String;
@@ -1380,8 +1416,6 @@ class _HomeContentState extends State<_HomeContent> {
     if (dateStr.isEmpty) return false;
     return fmt.format(day) == dateStr;
   }
-
-
 
   // ---------------- UI ----------------
   @override
@@ -1572,7 +1606,7 @@ class _HomeContentState extends State<_HomeContent> {
 
   // ==== your helpers & widgets (unchanged) ================================
 
-  Widget _buildProgressGraph() { /* … exactly as you posted … */
+  Widget _buildProgressGraph() {
     return ValueListenableBuilder<List<double>>(
       valueListenable: weeklyProgressNotifier,
       builder: (context, weeklyProgress, _) {
@@ -1630,6 +1664,7 @@ class _HomeContentState extends State<_HomeContent> {
               lineBarsData: [
                 LineChartBarData(
                   isCurved: true,
+                  isStrokeCapRound: false,
                   color: const Color(0xFF2d59f0),
                   barWidth: 4,
                   spots: List.generate(

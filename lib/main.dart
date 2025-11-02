@@ -15,6 +15,7 @@ import 'package:workmanager/workmanager.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'analytics/analytics_bootstrap.dart';
 import 'services/notification_service.dart';
 import 'firebase_options.dart';
 import 'services/missed_dose_service.dart';
@@ -127,6 +128,7 @@ Future<void> main() async {
 
     // (Optional) Disable collection until user consents:
      await analytics.setAnalyticsCollectionEnabled(true);
+    await AnalyticsBootstrap.init();
 
     // 2) Firestore offline-first
     FirebaseFirestore.instance.settings = const Settings(

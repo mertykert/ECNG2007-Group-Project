@@ -111,49 +111,66 @@ class _SchedulePageState extends State<SchedulePage> {
     // Optimistic UI
     setState(() => _localTakenCache[localKey] = !current);
 
-    final ownerRef =
     FirebaseFirestore.instance.collection('users').doc(ownerId);
-    final medRef = ownerRef.collection('medications').doc(id);
+    final medRef = FirebaseFirestore.instance
+        .collection('users').doc(ownerId)
+        .collection('medications').doc(id);
 
-    try {
-      final medSnap = await medRef.get();
-      if (!medSnap.exists) {
-        setState(() => _localTakenCache.remove(localKey));
-        return;
-      }
-      final medData = medSnap.data()!;
-      final newStatus = !current;
+    final snap = await medRef.get();
+    if (!snap.exists) return;
+    final m = snap.data()!;
 
-      await AppAnalytics.logMedicationTaken(
-        ownerUid: ownerId,
-        medId: id,
-        taken: newStatus,
+    final String selectedIso = DateFormat('yyyy-MM-dd').format(_selectedDay ?? DateTime.now());
+    final String todayIso    = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final bool isSelectedToday = (selectedIso == todayIso);
+
+    final bool newStatus = !current;
+
+    // 1) Write scalar + per-day flag for the selected day
+    await medRef.update({
+      'taken': newStatus,
+      'takenByDate.$selectedIso': newStatus,
+    });
+
+    // 2) Adjust stock ONLY if the selected day is today (so history days don’t change stock)
+    if (isSelectedToday) {
+      final int perDose   = (m['perDose'] ?? 1) as int;
+      final int total     = (m['totalPills'] ?? 0) as int;
+      final int remaining = (m['remainingPills'] ?? total) as int;
+
+      final int delta        = newStatus ? -perDose : perDose;  // taken→subtract, undo→add back
+      final int newRemaining = (remaining + delta).clamp(0, 100000);
+
+      await medRef.update({'remainingPills': newRemaining});
+
+      // keep refill fields in sync
+      await medRef.set(
+        RefillService.computeRefillPatch({
+          'totalPills': total,
+          'remainingPills': newRemaining,
+          'refillThreshold': m['refillThreshold'],
+        }),
+        SetOptions(merge: true),
       );
-
-      // Per-day taken log
-      await medRef.update({
-        'taken': newStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Keep Home <-> Schedule in sync for today
-      if (selectedDateStr == todayStr) {
-        await medRef.update({'taken': newStatus});
-      }
-
-      // If taken today, decrement stock (centralized)
-      if (newStatus && selectedDateStr == todayStr) {
-        final perDose = (medData['perDose'] ?? 1) as int;
-        await RefillService.onDoseTaken(ownerId, id, perDose: perDose);
-      }
-    } catch (_) {
-      // Rollback on failure
-      setState(() => _localTakenCache.remove(localKey));
     }
+
+    // 3) Re-run refill checks (notifications / warn date)
+    await RefillService.checkOne(ownerId, id);
+
+    // 4) IMPORTANT: drop optimistic override so stream updates win (and changes from Home are visible)
+
+    if (mounted) setState(() => _localTakenCache.remove(localKey));
+
   }
 
-
-
+  bool isTakenOn(Map<String, dynamic> m, DateTime day) {
+    final iso = DateUtils.dateOnly(day).toIso8601String().substring(0, 10);
+    final byDate = (m['takenByDate'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final v = byDate[iso];
+    if (v == true || (v is num && v != 0)) return true;
+    if ((m['date'] as String?) == iso && (m['taken'] == true)) return true; // once-med fallback
+    return false;
+  }
 
   // Cancel local notifications for a med (handles int | num from Firestore)
   Future<void> _cancelMedNotifications(Map<String, dynamic> medData) async {

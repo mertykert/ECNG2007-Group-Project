@@ -51,17 +51,18 @@ class OfflineService {
   // ----------------- Reads -----------------
   static List<Map<String, dynamic>> loadTodayMeds(String ownerId, String date) {
     final b = _meds;
-    if (b == null) return const [];
+    if (b == null) return <Map<String, dynamic>>[];
+
     final raw = b.get(todayMedsKey(ownerId, date));
     if (raw is List) {
-      // materialize to a mutable list of mutable maps
+      // deep copy + growable so callers can modify
       return raw
-          .where((e) => e is Map)
           .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+          .toList(growable: true);
     }
-    return const [];
+    return <Map<String, dynamic>>[];
   }
+
 
   static double? loadTodayProgress(String ownerId, String date) {
     final b = _meds;
@@ -92,50 +93,46 @@ class OfflineService {
     final b = _meds;
     if (b == null) return;
 
-    final list = loadTodayMeds(ownerId, date); // mutable copy
-    final id = (med['id'] as String?)?.trim();
+    final key = todayMedsKey(ownerId, date);
+    final raw = b.get(key);
 
-    int idx = -1;
-    if (id != null && id.isNotEmpty) {
-      idx = list.indexWhere((m) => (m['id'] as String?) == id);
-    } else {
-      idx = list.indexWhere((m) =>
-      (m['name'] ?? '') == (med['name'] ?? '') &&
-          (m['time'] ?? '') == (med['time'] ?? '') &&
-          (m['date'] ?? '') == (med['date'] ?? ''));
-    }
+    // Always work on a growable deep copy
+    final List<Map<String, dynamic>> list = (raw is List)
+        ? raw
+        .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map))
+        .toList(growable: true)
+        : <Map<String, dynamic>>[];
+
+    final idx = list.indexWhere((m) =>
+    (m['id'] ?? '') == (med['id'] ?? '') || // prefer id if present
+        ((m['name'] ?? '') == (med['name'] ?? '') &&
+            (m['time'] ?? '') == (med['time'] ?? '') &&
+            (m['date'] ?? '') == (med['date'] ?? '')));
 
     if (idx >= 0) {
       list[idx] = {...list[idx], ...med};
     } else {
-      list.add(Map<String, dynamic>.from(med));
+      list.add(med);
     }
 
-    await b.put(todayMedsKey(ownerId, date), list);
+    await b.put(key, list);
   }
 
   /// Delete by Firestore medId (preferred). Falls back to (name,time,date) if id missing.
-  static Future<void> deleteTodayMedById(String ownerId, String dayIso, String medId, {Map<String, dynamic>? fallbackMed}) async {
+  static Future<void> deleteTodayMedById(String ownerUid, String dayIso, String medId) async {
     final b = _meds;
     if (b == null) return;
 
-    final key = todayMedsKey(ownerId, dayIso);
-    final list = loadTodayMeds(ownerId, dayIso); // mutable copy
+    final key = todayMedsKey(ownerUid, dayIso);
+    final raw = b.get(key);
 
-    int before = list.length;
+    final List<Map<String, dynamic>> list = (raw is List)
+        ? raw
+        .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map))
+        .toList(growable: true)
+        : <Map<String, dynamic>>[];
+
     list.removeWhere((m) => (m['id'] as String?) == medId);
-
-    // If nothing removed and we have fallback fields, try composite
-    if (list.length == before && fallbackMed != null) {
-      final name = (fallbackMed['name'] ?? '') as String;
-      final time = (fallbackMed['time'] ?? '') as String;
-      final date = (fallbackMed['date'] ?? '') as String;
-      list.removeWhere((m) =>
-      (m['name'] ?? '') == name &&
-          (m['time'] ?? '') == time &&
-          (m['date'] ?? '') == date);
-    }
-
     await b.put(key, list);
   }
 }
