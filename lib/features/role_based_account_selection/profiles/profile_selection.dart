@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
 
 class ProfileSelectionScreen extends StatefulWidget {
   const ProfileSelectionScreen({super.key});
@@ -41,6 +42,105 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
           'receiverUid': user.uid,
           'createdAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+      }
+
+      if (role == 'caregiver') {
+        final codeCtrl = TextEditingController();
+
+        // WHY: prompt caregiver to enter receiver's code to link accounts
+        final entered = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: const Text(
+              "Enter Partner Code",
+              style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2d59f0)),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Ask your care receiver for their partner code and enter it below.",
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 6,
+                  decoration: const InputDecoration(
+                    hintText: "e.g. ABC123",
+                    counterText: "",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actionsAlignment: MainAxisAlignment.spaceBetween,
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, null),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () {
+                  final raw = codeCtrl.text.trim().toUpperCase();
+                  Navigator.pop(context, raw.isEmpty ? null : raw);
+                },
+                child: const Text(
+                  "Link",
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2d59f0)),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (entered == null) {
+          // user cancelled; keep role saved and return to selector/home
+          if (!mounted) return;
+          Navigator.pushReplacementNamed(context, '/profileSelect');
+          return;
+        }
+
+        final code = entered;
+        // 1) Look up invite → resolve receiver uid
+        final invite = await db.collection('invites').doc(code).get(const GetOptions(source: Source.serverAndCache));
+        final inv = invite.data();
+        if (inv == null || (inv['receiverUid'] as String?) == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Invalid code. Ask your partner to share their code again.")),
+          );
+          return;
+        }
+        final receiverUid = (inv['receiverUid'] as String).trim();
+
+        // 2) Write bidirectional link (idempotent merges)
+        final caregiverUid = user.uid;
+        final now = FieldValue.serverTimestamp();
+
+        // Caregiver → linkedReceivers/{receiverUid}
+        await db.collection('users').doc(caregiverUid)
+            .collection('linkedReceivers').doc(receiverUid)
+            .set({'createdAt': now, 'partnerCode': code}, SetOptions(merge: true));
+
+        // Receiver → linkedCaregivers/{caregiverUid}
+        await db.collection('users').doc(receiverUid)
+            .collection('linkedCaregivers').doc(caregiverUid)
+            .set({'createdAt': now}, SetOptions(merge: true));
+
+        // Optional: store pointers on root docs (fast access)
+        await db.collection('users').doc(caregiverUid)
+            .set({'linkedTo': receiverUid}, SetOptions(merge: true));
+        await db.collection('users').doc(receiverUid)
+            .set({'hasCaregiver': true}, SetOptions(merge: true));
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Linked successfully."), backgroundColor: Color(0xFF2d59f0)),
+        );
       }
 
       if (!mounted) return;

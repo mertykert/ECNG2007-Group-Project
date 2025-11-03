@@ -105,94 +105,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
           await AppAnalytics.identifyUser(uid: uid, role: role);
           await AppAnalytics.logSignUp(method: 'password');   // in signup
 
-          //  Show dialog with partner code
-          await showDialog(
-            context: context,
-            builder: (_) => AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(15),
-              ),
-              title: const Text(
-                "Your Partner Code",
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF2d59f0),
-                ),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    "Share this code with your partner to link accounts:",
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 14),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2d59f0).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      partnerCode,
-                      style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 2,
-                        color: Color(0xFF2d59f0),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    "Ask your caregiver or care receiver to enter this code on their home screen.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.black54, fontSize: 14),
-                  ),
-                ],
-              ),
-              actionsAlignment: MainAxisAlignment.center,
-              actions: [
-                TextButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: partnerCode));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Partner code copied to clipboard"),
-                        backgroundColor: Color(0xFF2d59f0),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.copy, color: Color(0xFF2d59f0)),
-                  label: const Text(
-                    "Copy Code",
-                    style: TextStyle(
-                      color: Color(0xFF2d59f0),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    Navigator.pushReplacementNamed(context, '/profileSelect');
-                  },
-                  child: const Text(
-                    "Continue",
-                    style: TextStyle(
-                      color: Color(0xFF2d59f0),
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
         }
-      } on FirebaseAuthException catch (e) {
+      }
+      on FirebaseAuthException catch (e) {
         if (!context.mounted) return;
 
         String message;
