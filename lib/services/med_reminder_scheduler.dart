@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
 import 'package:hive/hive.dart';
+import 'package:medi_care/services/refill_service.dart';
 import 'notification_service.dart';
+
 
 
 class MedReminderScheduler {
@@ -190,6 +192,60 @@ class MedReminderScheduler {
         if (expiryId != null) 'expiry':   expiryId,
       });
 
+      // ===== Refill co-schedule (daily at med time while stock is low) =====
+      try {
+        // Load live stock from Firestore for this med
+        final docSnap = await _db.collection('users').doc(uid)
+            .collection('medications').doc(medId).get();
+        if (docSnap.exists) {
+          final d = docSnap.data()!;
+          final String medName = (d['name'] ?? name).toString();
+
+          // robust ints
+          final int total     = ((d['totalPills'] ?? 0) as num).toInt();
+          final int remaining = ((d['remainingPills'] ?? total) as num).toInt();
+          int threshold       = ((d['refillThreshold'] ?? 0) as num).toInt();
+          if (threshold <= 0) {
+            threshold = total > 0 ? (total * 0.20).round().clamp(1, total) : 1;
+          }
+          final bool needsRefill = total > 0 && remaining <= threshold;
+
+          // Always cancel existing refill alarm; re-add only if low
+          final int fid = NotificationService.stableIdFor(uid, medId, kind: 'refill');
+          await NotificationService.cancel(fid);
+
+          if (kDebugMode) {
+            print("🧮 refill: med=$medId needsRefill=$needsRefill total=$total remaining=$remaining thr=$threshold");
+          }
+
+          if (needsRefill) {
+            // Use same time as the med reminder (time24); fallback to +60s
+            DateTime firstAt;
+            final String t24 = (time24).toString().trim();
+            if (RegExp(r'^\d{1,2}:\d{2}$').hasMatch(t24)) {
+              final parts = t24.split(':');
+              final now = DateTime.now();
+              final hh = int.tryParse(parts[0]) ?? now.hour;
+              final mm = int.tryParse(parts[1]) ?? now.minute;
+              firstAt = DateTime(now.year, now.month, now.day, hh, mm);
+              if (!firstAt.isAfter(now)) firstAt = firstAt.add(const Duration(days: 1));
+            } else {
+              firstAt = DateTime.now().add(const Duration(seconds: 60));
+            }
+
+            await NotificationService.scheduleAt(
+              firstAt,
+              "Refill Reminder",
+              "$medName is running low — please refill.",
+              id: fid,
+              payload: 'med:$uid:$medId:refill',
+              repeat: DateTimeComponents.time, // daily at med time
+            );
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) print("⚠️ Refill co-schedule failed for $medId: $e");
+      }
 
       await Hive.box('scheduled_reminders').put(medId, {
         'uid': uid,
@@ -243,6 +299,8 @@ class MedReminderScheduler {
       final expiryId   = NotificationService.stableIdFor(uid, medId, kind: 'expiry');
       await NotificationService.cancel(reminderId);
       await NotificationService.cancel(expiryId);
+      final refillId   = NotificationService.stableIdFor(uid, medId, kind: 'refill');
+      await NotificationService.cancel(refillId);
 
       // 2️⃣ Double-check for any older random IDs saved in Firestore
       final doc = await FirebaseFirestore.instance

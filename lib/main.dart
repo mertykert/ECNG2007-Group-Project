@@ -60,6 +60,7 @@ void callbackDispatcher() {
           final uid = (inputData?['uid'] as String?) ?? '';
           if (uid.isNotEmpty) {
             await NotificationService.resetFromFirestore(uid);
+            await RefillService.checkAll(uid);
           }
           if (kDebugMode) print("🔁 Background resync of reminders completed");
           return true;

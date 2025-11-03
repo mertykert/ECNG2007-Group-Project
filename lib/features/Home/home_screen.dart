@@ -1178,6 +1178,11 @@ class _HomeContentState extends State<_HomeContent> {
     await _cancelMedNotifications(data);
 
     await medSnap.reference.delete();
+    await NotificationService.showNow(
+      'Medication deleted',
+      '"$name" was removed.',
+      id: NotificationService.stableIdFor(ownerId, id, kind: 'deleted'),
+    );
 
     // 2) Local cache delete (safe even if offline cache missing)
     final todayDel = DateFormat('yyyy-MM-dd').format(DateTime.now());

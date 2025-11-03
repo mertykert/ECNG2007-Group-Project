@@ -57,6 +57,25 @@ class MissedDoseService {
         );
       }
 
+      final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final meds = await _firestore.collection('users').doc(uid)
+          .collection('medications').get();
+
+      final batch = _firestore.batch();
+      for (final doc in meds.docs) {
+        final data = doc.data();
+
+        // Reset only the scalar and rollover marker; keep takenByDate history intact.
+        final updates = <String, dynamic>{
+          'taken': false,
+        };
+        if ((data['adjustedFor'] as String?) == todayIso) {
+          updates['adjustedFor'] = FieldValue.delete();
+        }
+        batch.update(doc.reference, updates);
+      }
+      await batch.commit();
+
       await prefs.setString('lastMissedCheck_$uid', today);
     } catch (e) {
       print("⚠️ MissedDoseService failed: $e");

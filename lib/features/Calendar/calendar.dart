@@ -208,6 +208,11 @@ class _SchedulePageState extends State<SchedulePage> {
       await _cancelMedNotifications(medSnap.data()!);
 
       await medSnap.reference.delete();
+      await NotificationService.showNow(
+        'Medication deleted',
+        '"$name" was removed.',
+        id: NotificationService.stableIdFor(ownerId, id, kind: 'deleted'),
+      );
 
       if (!mounted) return;
       setState(() {}); // refresh

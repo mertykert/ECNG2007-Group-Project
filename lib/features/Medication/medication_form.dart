@@ -127,6 +127,13 @@ class _MedicationFormState extends State<MedicationForm> {
       _dosageCtrl.text = (data['dosage'] ?? '').toString();
       _expiryCtrl.text = (data['expiryDate'] ?? '').toString();
       _totalCtrl.text  = _asInt(data['totalPills']).toString();
+      try {
+        final int total     = _asInt(data['totalPills']);
+        final int remaining = _asInt(data['remainingPills']);
+        if (remaining >= 0 && remaining < total) {
+          _totalCtrl.text = remaining.toString();
+        }
+      } catch (_) {}
       _taken           = data['taken'] == true;
       _repeat          = (data['repeat'] ?? 'Once').toString();
 
@@ -477,6 +484,11 @@ class _MedicationFormState extends State<MedicationForm> {
     }
 
     setState(() => _loading = true);
+    if (_selectedTime == null) {
+      // last resort: now+60s so downstream refill can repeat daily from a valid anchor
+      final now = TimeOfDay.now();
+      _selectedTime = now;
+    }
     try {
       final user = FirebaseAuth.instance.currentUser;
       final ownerId = widget.ownerId ?? user?.uid;
@@ -510,7 +522,7 @@ class _MedicationFormState extends State<MedicationForm> {
           'lowStockNotified': false,
         };
 
-        // ✅ compute & merge refill fields (needsRefill, threshold, etc.)
+        //  compute & merge refill fields (needsRefill, threshold, etc.)
         final payload = {...base, ...RefillService.computeRefillPatch(base)};
 
         final medRef = await userRef.collection('medications').add(payload);
@@ -558,11 +570,12 @@ class _MedicationFormState extends State<MedicationForm> {
         // Cancel previous timers before re-schedule
         await MedReminderScheduler.cancelTimersForMed(ownerId, widget.medId!);
 
+
         final oldTotal = (old['totalPills'] ?? 0) as int;
         final oldRemaining = (old['remainingPills'] ?? oldTotal) as int;
         final newTotal = int.tryParse(_totalCtrl.text.trim()) ?? oldTotal;
 
-        // ✅ If total increased, treat as a refill: reset remaining to newTotal.
+        // If total increased, treat as a refill: reset remaining to newTotal.
         // Else clamp remaining within [0, newTotal].
         int newRemaining;
         if (newTotal > oldTotal) {
@@ -588,12 +601,14 @@ class _MedicationFormState extends State<MedicationForm> {
           'updatedAt': FieldValue.serverTimestamp(),
         };
 
-        // ✅ recompute refill fields from new totals/remaining
+        // recompute refill fields from new totals/remaining
+        final bool totalChanged = newTotal != oldTotal;
         final refillPatch = RefillService.computeRefillPatch({
-          'totalPills': newTotal,
-          'remainingPills': newRemaining,
-          'refillThreshold': old['refillThreshold'],
-        });
+           'totalPills': newTotal,
+           'remainingPills': newRemaining,
+           // Force recompute when total changed; otherwise keep explicit value.
+           'refillThreshold': totalChanged ? 0 : ((old['refillThreshold'] ?? 0) as num).toInt(),
+         });
 
         await docRef.set({...baseUpdate, ...refillPatch}, SetOptions(merge: true));
 

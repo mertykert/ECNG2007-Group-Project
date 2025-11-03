@@ -10,7 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'med_reminder_scheduler.dart' as sched;
-
+import 'refill_service.dart';
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin =
   FlutterLocalNotificationsPlugin();
@@ -166,8 +166,10 @@ class NotificationService {
       // Belt & suspenders: cancel by our deterministic IDs.
       final rid = stableIdFor(uid, medId, kind: 'reminder');
       final eid = stableIdFor(uid, medId, kind: 'expiry');
+      final fid = stableIdFor(uid, medId, kind: 'refill');
       await _plugin.cancel(rid);
       await _plugin.cancel(eid);
+      await _plugin.cancel(fid);
 
       // Now scan all pending for payload-tagged items (covers older/random IDs once we start tagging).
       final pending = await _plugin.pendingNotificationRequests();
@@ -231,6 +233,57 @@ class NotificationService {
           },
         );
 
+        // ---- Refill co-schedule (daily at med time while low) ----
+        try {
+          final d = (await FirebaseFirestore.instance
+              .collection('users').doc(uid)
+              .collection('medications').doc(doc.id).get()).data();
+
+          if (d != null) {
+            final String name  = (d['name'] ?? 'Medication').toString();
+            final int total    = (d['totalPills'] ?? 0) as int;
+            final int remaining= (d['remainingPills'] ?? total) as int;
+
+            int threshold = (d['refillThreshold'] ?? 0) as int;
+            if (threshold <= 0) {
+              threshold = total > 0 ? (total * 0.20).round().clamp(1, total) : 1;
+            }
+            final bool needsRefill = total > 0 && remaining <= threshold;
+
+            // Always cancel existing refill alarm; re-add only if low.
+            final int fid = NotificationService.stableIdFor(uid, doc.id, kind: 'refill');
+            await NotificationService.cancel(fid);
+
+            if (needsRefill) {
+              // Use same time as med reminder (time24) if present; else +60s
+              final String t24 = (d['time24'] ?? '').toString().trim();
+              DateTime firstAt;
+              if (RegExp(r'^\d{1,2}:\d{2}$').hasMatch(t24)) {
+                final parts = t24.split(':');
+                final now = DateTime.now();
+                final hh = int.tryParse(parts[0]) ?? now.hour;
+                final mm = int.tryParse(parts[1]) ?? now.minute;
+                firstAt = DateTime(now.year, now.month, now.day, hh, mm);
+                if (!firstAt.isAfter(now)) firstAt = firstAt.add(const Duration(days: 1));
+              } else {
+                firstAt = DateTime.now().add(const Duration(seconds: 60));
+              }
+
+              await NotificationService.scheduleAt(
+                firstAt,
+                "Refill Reminder",
+                "$name is running low — please refill.",
+                id: fid,
+                payload: 'med:$uid:${doc.id}:refill',
+                repeat: DateTimeComponents.time, // daily at med time
+              );
+            }
+          }
+        } catch (e) {
+          // ignore: avoid_print
+          print("⚠️ refill co-schedule in reset failed for ${doc.id}: $e");
+        }
+
         await box.put(doc.id, {
           'uid': uid,
           'name': name,
@@ -247,6 +300,8 @@ class NotificationService {
       // Kill any OS-pending notifications that reference meds you no longer have
       await cleanUserPending(uid);
       await dumpPending();
+      await RefillService.checkAll(uid);
+      print("🔁 Refill pass queued after resetFromFirestore for $uid");
       print("✅ resetFromFirestore: scheduled=$scheduled, skipped=$skipped for $uid");
     } catch (e, st) {
       print("❌ resetFromFirestore error: $e\n$st");
@@ -351,7 +406,7 @@ class NotificationService {
 
     try {
       // 🕓 Ensure timezone initialized before scheduling
-      tz.initializeTimeZones();
+      await _ensureTz();
 
       final dynamic tzResult = await FlutterTimezone.getLocalTimezone();
 
@@ -525,6 +580,8 @@ class NotificationService {
       }
 
       await dumpPending();
+      await RefillService.checkAll(uid);
+      print("🔁 Refill pass queued after purgeAndReseed for $uid");
       print("✅ purgeAndReseed: scheduled=$scheduled, skipped=$skipped for $uid");
     } catch (e, st) {
       print("❌ purgeAndReseed error: $e\n$st");
