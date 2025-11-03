@@ -807,7 +807,7 @@ class _AppDrawerState extends State<_AppDrawer> {
             const Align(
               alignment: Alignment.center,
               child: Text(
-                "MediCare v1.0",
+                "MediCare v1.0.0",
                 style: TextStyle(color: Colors.white70, fontSize: 13, letterSpacing: 0.3),
               ),
             ),
