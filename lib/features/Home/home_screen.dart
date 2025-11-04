@@ -513,10 +513,9 @@ class _AppDrawerState extends State<_AppDrawer> {
 
     // Link pressed: call service with the code
     try {
-      await partner_service.linkReceiverByCode(code.trim());
-      await _refreshLinkInfo();    // your existing refresh method
+      final receiverUid = await partner_service.linkReceiverByCode(code.trim());
+      await _refreshLinkInfo();
       if (!mounted) return;
-      final receiverUid = await partner_service.linkReceiverByCode(code);
       await AppAnalytics.logPartnerLinked(receiverUid: receiverUid);
       await _showToast(title: 'Linked successfully');
       await _refreshLinkInfo();
@@ -834,6 +833,7 @@ class _HomeContentState extends State<_HomeContent> {
   final ValueNotifier<double> _todayProgressNotifier = ValueNotifier(0.0);
   StreamSubscription? _medListener;
   Timer? _updateThrottle;
+  static const int _resetCutoverHour = 0;
 
   @override
   void initState() {
@@ -848,15 +848,77 @@ class _HomeContentState extends State<_HomeContent> {
       _loadWeeklyProgress(targetUid);
       _loadTodayProgress(targetUid);
       _adjustDailyRemainingPills(targetUid);
+      await _resetDailyTakenForAll(targetUid);
+      _armResetTimer(targetUid);
     }());
+  }
+
+  Timer? _resetTimer;
+  void _armResetTimer(String ownerId) {
+    _resetTimer?.cancel();
+    final when = _nextCutover();
+    final dur = when.difference(DateTime.now());
+    // WHY: Re-arm daily; keeps working without app restarts.
+    _resetTimer = Timer(dur, () async {
+      await _resetDailyTakenForAll(ownerId);
+      _armResetTimer(ownerId); // re-arm for next day
+    });
   }
 
   @override
   void dispose() {
+    _resetTimer?.cancel();
     _medListener?.cancel();
     weeklyProgressNotifier.dispose();
     _todayProgressNotifier.dispose();
     super.dispose();
+  }
+
+  String _todayIsoWithCutover([int cutoverHour = _resetCutoverHour]) {
+    // WHY: Shift the clock back by cutover so the "day" flips at cutoverHour.
+    final now = DateTime.now();
+    final shifted = now.subtract(Duration(hours: cutoverHour));
+    final d = DateTime(shifted.year, shifted.month, shifted.day);
+    return "${d.year.toString().padLeft(4,'0')}-"
+        "${d.month.toString().padLeft(2,'0')}-"
+        "${d.day.toString().padLeft(2,'0')}";
+  }
+
+  DateTime _nextCutover([int cutoverHour = _resetCutoverHour]) {
+    // WHY: Schedule reset exactly at the next boundary.
+    final now = DateTime.now();
+    final todayCutover = DateTime(now.year, now.month, now.day, cutoverHour);
+    return todayCutover.isAfter(now) ? todayCutover : todayCutover.add(const Duration(days: 1));
+  }
+
+  Future<void> _resetDailyTakenForAll(String uid) async {
+    try {
+      final todayIso = _todayIsoWithCutover(); // uses cutover hour
+      final meds = await FirebaseFirestore.instance
+          .collection('users').doc(uid)
+          .collection('medications')
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in meds.docs) {
+        final d = doc.data();
+        final repeat = (d['repeat'] ?? 'Once').toString().trim().toLowerCase();
+        if (repeat != 'daily' && repeat != 'weekly') continue;
+
+        final last = (d['lastTakenDate'] as String?) ?? '';
+        final stickyTaken = d['taken'] == true;
+
+        if (stickyTaken && last != todayIso) {
+          batch.set(doc.reference, {
+            'taken': false,
+            'lastTakenDate': FieldValue.delete(),
+          }, SetOptions(merge: true));
+        }
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint("⚠️ _resetDailyTakenForAll failed: $e");
+    }
   }
 
   Future<void> _loadCaregiverName() async {
@@ -920,8 +982,8 @@ class _HomeContentState extends State<_HomeContent> {
       // cancel any previous meds sub
       _updateThrottle?.cancel();
 
-      // re-subscribe to that user's medications
-      FirebaseFirestore.instance
+      StreamSubscription? inner;
+      inner = FirebaseFirestore.instance
           .collection('users')
           .doc(targetUserId)
           .collection('medications')
@@ -933,6 +995,11 @@ class _HomeContentState extends State<_HomeContent> {
           _loadTodayProgress(targetUserId);
         });
       });
+
+      // cancel previous inner sub when target changes
+      _medListener?.cancel();
+      _medListener = inner;
+
 
       // also do an immediate load for the new target
       _loadWeeklyProgress(targetUserId);
@@ -959,8 +1026,7 @@ class _HomeContentState extends State<_HomeContent> {
 
       final medsQuery = users
           .doc(targetUid)
-          .collection('medications')
-          .where('date', isEqualTo: today);
+          .collection('medications');
 
       return medsQuery.snapshots().map((snap) => snap.docs);
     });
@@ -976,15 +1042,39 @@ class _HomeContentState extends State<_HomeContent> {
     if (!medSnap.exists) return;
     final medData = medSnap.data()!;
 
-    final String todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final bool   newStatus = !currentStatus;
+    final String todayIso = _todayIsoWithCutover();
+    final parts = todayIso.split('-'); // yyyy-mm-dd
+    final cutoverDay = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
 
-// 1) Write scalar + per-day flag for TODAY
+    // was it taken for *this logical day*?
+    final bool wasTaken = _wasTakenOn(medData, cutoverDay);
+
+    // flip
+    final bool newStatus = !wasTaken;
+
+    // write atomically for this day
     await medRef.update({
-      'taken': newStatus,
-      'takenByDate.$todayIso': newStatus,
-      'lastTakenDate': newStatus ? todayIso : FieldValue.delete(), // keep per-day truth
+      'taken': newStatus,                                // legacy scalar
+      'takenByDate.$todayIso': newStatus,                // per-day map
+      if (newStatus)
+        'lastTakenDate': todayIso
+      else
+        'lastTakenDate': FieldValue.delete(),
     });
+
+    // keep local map in sync so the chip reflects immediately
+    setState(() {
+      final map = (medData['takenByDate'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+      map[todayIso] = newStatus;
+      medData['takenByDate'] = map;
+      medData['taken'] = newStatus; // legacy scalar for older reads
+      if (newStatus) {
+      medData['lastTakenDate'] = todayIso;
+      } else {
+        medData.remove('lastTakenDate');
+      }
+    });
+
 
 // 2) Symmetric stock math for TODAY
     final bool isToday = true; // we’re toggling from “Today’s Meds” section
@@ -1279,25 +1369,35 @@ class _HomeContentState extends State<_HomeContent> {
   Future<void> _loadWeeklyProgress(String targetUid) async {
     if (!mounted) return;
     try {
-      final all = await FirebaseFirestore.instance
-          .collection('users').doc(targetUid)
+      //  Use same "logical day" cutover that taken toggles use
+      final nowShifted = DateTime.now().subtract(Duration(hours: _resetCutoverHour));
+      final base = DateTime(nowShifted.year, nowShifted.month, nowShifted.day);
+
+      // Generate the 7 logical days (Mon–Sun)
+      final start = base.subtract(Duration(days: base.weekday - 1)); // logical Monday
+      final days = List<DateTime>.generate(7, (i) => start.add(Duration(days: i)));
+
+      // Get all medications (no date filter; we filter by schedule)
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(targetUid)
           .collection('medications')
           .get();
+      final meds = snapshot.docs
+          .map((d) => {'id': d.id, ...Map<String, dynamic>.from(d.data())})
+          .toList();
 
-      final meds = all.docs.map((d) => {'id': d.id, ...Map<String, dynamic>.from(d.data())}).toList();
-
-      final now = DateTime.now();
-      final start = now.subtract(Duration(days: now.weekday - 1)); // Monday
       final progress = <double>[];
 
-      for (int i = 0; i < 7; i++) {
-        final day = DateTime(start.year, start.month, start.day + i);
+      for (final day in days) {
         final todays = meds.where((m) => _isScheduledForDay(m, day)).toList();
+
         if (todays.isEmpty) {
           progress.add(0.0);
         } else {
           final total = todays.length;
-          final taken = todays.where((m) => _wasTakenOn(m, day)).length;
+          // Use safe predicate that respects cutover and avoids double-counts
+          final taken = todays.where((m) => _wasTakenOnSafe(m, day)).length;
           progress.add(taken / total);
         }
       }
@@ -1307,7 +1407,7 @@ class _HomeContentState extends State<_HomeContent> {
 
       final weekStartIso = DateFormat('yyyy-MM-dd').format(start);
       await OfflineService.saveWeekProgress(targetUid, weekStartIso, progress);
-    } catch (_) {
+    } catch (e) {
       final now = DateTime.now();
       final start = now.subtract(Duration(days: now.weekday - 1));
       final weekKey = DateFormat('yyyy-MM-dd').format(start);
@@ -1316,6 +1416,22 @@ class _HomeContentState extends State<_HomeContent> {
     }
   }
 
+  bool _wasTakenOnSafe(Map<String, dynamic> med, DateTime day) {
+    final iso = "${day.year.toString().padLeft(4, '0')}-"
+        "${day.month.toString().padLeft(2, '0')}-"
+        "${day.day.toString().padLeft(2, '0')}";
+
+    final byDate = (med['takenByDate'] as Map?)?.cast<String, dynamic>();
+    if (byDate != null) {
+      final v = byDate[iso];
+      if (v == true || v == 1) return true;
+    }
+
+    final last = med['lastTakenDate'] as String?;
+    if (last == iso) return true;
+
+    return false;
+  }
 
   Future<void> _showInfoDialog(String title, String message) async {
     const blue = Color(0xFF2d59f0);
@@ -1591,6 +1707,8 @@ class _HomeContentState extends State<_HomeContent> {
                                   'expiryDate': m['expiryDate'],
                                   'repeat': m['repeat'],
                                   'date': m['date'],
+                                  'takenByDate': m['takenByDate'],
+                                  'lastTakenDate': m['lastTakenDate'],
                                 });
                               },
                             );
@@ -1793,7 +1911,10 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Widget _modernMedicationCard(Map<String, dynamic> med) {
-    final bool isTaken = med['taken'] ?? false;
+    final String todayIso = _todayIsoWithCutover();
+    final p = todayIso.split('-');
+    final cutoverDay = DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+    final bool isTaken = _wasTakenOn(med, cutoverDay);
     final String name = med['name'] ?? 'Unknown';
     final String time = med['time'] ?? 'Unknown';
     final String id = med['id'];
