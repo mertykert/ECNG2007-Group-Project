@@ -31,7 +31,11 @@ class MissedDoseService {
 
       for (final doc in medsSnapshot.docs) {
         final data = doc.data();
-        final taken = data['taken'] == true;
+        final Map<String, dynamic>? byDate = (data['takenByDate'] as Map?)?.cast<String, dynamic>();
+        final bool takenByMap = byDate != null && (byDate[dateStr] == true || byDate[dateStr] == 1);
+        final bool takenByLast = (data['lastTakenDate'] as String?) == dateStr;
+        final bool takenByList = ((data['takenDates'] as List?) ?? const []).contains(dateStr);
+        final bool taken = takenByMap || takenByLast || takenByList;
         if (!taken) {
           missedList.add({
             'name': data['name'] ?? 'Unknown',

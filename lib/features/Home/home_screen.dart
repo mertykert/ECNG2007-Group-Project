@@ -983,6 +983,7 @@ class _HomeContentState extends State<_HomeContent> {
     await medRef.update({
       'taken': newStatus,
       'takenByDate.$todayIso': newStatus,
+      'lastTakenDate': newStatus ? todayIso : FieldValue.delete(), // keep per-day truth
     });
 
 // 2) Symmetric stock math for TODAY
@@ -1053,7 +1054,7 @@ class _HomeContentState extends State<_HomeContent> {
         // Only adjust those DUE today (Daily or Once today / Weekly today)
         if (!_isScheduledForDay(med, today)) continue;
 
-        final taken = data['taken'] == true;
+        final taken = _wasTakenOn(med, today);
         final alreadyAdjusted = (data['adjustedFor'] as String?) == todayIso;
 
         if (taken && !alreadyAdjusted) {

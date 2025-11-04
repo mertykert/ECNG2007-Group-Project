@@ -245,6 +245,7 @@ class _MedicationFormState extends State<MedicationForm> {
     );
   }
 
+  // REPLACE your entire _showDosagePicker() with this version
   void _showDosagePicker() {
     int quantity = 1;
     int strength = 5;
@@ -259,105 +260,126 @@ class _MedicationFormState extends State<MedicationForm> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: SizedBox(
-                height: 340,
-                child: Column(
-                  children: [
-                    const SizedBox(height: 12),
-                    Container(
-                      width: 50, height: 5,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
+        // Freeze text scale for the *entire* dosage sheet
+        final mq = MediaQuery.of(context);
+        final media = mq.copyWith(
+          textScaler: const TextScaler.linear(1.0), // Flutter ≥3.16
+        );
+
+        return MediaQuery(
+          data: media,
+          child: StatefulBuilder(
+            builder: (context, setModalState) {
+              return SafeArea(
+                child: SizedBox(
+                  height: 340,
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 12),
+                      Container(
+                        width: 50, height: 5,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text("Select Dosage",
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87)),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: CupertinoPicker(
-                              magnification: 1.3, squeeze: 1.1, diameterRatio: 1.2, itemExtent: 42,
-                              scrollController: FixedExtentScrollController(initialItem: 0),
-                              selectionOverlay: _greyOverlay(),
-                              onSelectedItemChanged: (i) => setModalState(() => quantity = i + 1),
-                              children: List.generate(
-                                10,
-                                    (i) => Center(
-                                  child: Text("${i + 1}",
-                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87)),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: CupertinoPicker(
-                              magnification: 1.3, squeeze: 1.1, diameterRatio: 1.2, itemExtent: 42,
-                              selectionOverlay: _greyOverlay(),
-                              onSelectedItemChanged: (i) => setModalState(() => unit = units[i]),
-                              children: units
-                                  .map((u) => Center(
-                                child: Text(u,
-                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87)),
-                              ))
-                                  .toList(),
-                            ),
-                          ),
-                          if (unit.contains("tablet") || unit.contains("capsule"))
+                      const SizedBox(height: 12),
+                      const Text(
+                        "Select Dosage",
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87),
+                        maxLines: 1, softWrap: false, overflow: TextOverflow.fade, // defensive
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
                             Expanded(
                               child: CupertinoPicker(
-                                magnification: 1.3, squeeze: 1.1, diameterRatio: 1.2, itemExtent: 42,
+                                magnification: 1.1, squeeze: 1.1, diameterRatio: 1.2, itemExtent: 42,
+                                scrollController: FixedExtentScrollController(initialItem: 0),
                                 selectionOverlay: _greyOverlay(),
-                                onSelectedItemChanged: (i) => setModalState(() => strength = strengths[i]),
-                                children: strengths
-                                    .map((mg) => Center(
-                                  child: Text("$mg mg each",
-                                      style: const TextStyle(
-                                          fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87)),
-                                ))
-                                    .toList(),
+                                onSelectedItemChanged: (i) => setModalState(() => quantity = i + 1),
+                                children: List.generate(
+                                  10,
+                                      (i) => const Center(
+                                    child: Text(
+                                      // text scale frozen by MediaQuery above
+                                      "", // placeholder, replaced below
+                                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
+                                    ),
+                                  ),
+                                ).asMap().entries.map((e) => Center(
+                                  child: Text("${e.key + 1}",
+                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
+                                    maxLines: 1, softWrap: false, overflow: TextOverflow.fade,
+                                  ),
+                                )).toList(),
                               ),
                             ),
-                        ],
+                            Expanded(
+                              child: CupertinoPicker(
+                                magnification: 1.1, squeeze: 1.1, diameterRatio: 1.2, itemExtent: 42,
+                                selectionOverlay: _greyOverlay(),
+                                onSelectedItemChanged: (i) => setModalState(() => unit = units[i]),
+                                children: units.map((u) => Center(
+                                  child: Text(
+                                    u,
+                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
+                                    maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+                                  ),
+                                )).toList(),
+                              ),
+                            ),
+                            if (unit.contains("tablet") || unit.contains("capsule"))
+                              Expanded(
+                                child: CupertinoPicker(
+                                  magnification: 1.1, squeeze: 1.1, diameterRatio: 1.2, itemExtent: 42,
+                                  selectionOverlay: _greyOverlay(),
+                                  onSelectedItemChanged: (i) => setModalState(() => strength = strengths[i]),
+                                  children: strengths.map((mg) => Center(
+                                    child: Text(
+                                      "$mg mg each",
+                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
+                                      maxLines: 1, softWrap: false, overflow: TextOverflow.fade,
+                                    ),
+                                  )).toList(),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2d59f0),
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(140, 48),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                        elevation: 4,
+                      const SizedBox(height: 10),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2d59f0),
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(140, 48),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                          elevation: 4,
+                        ),
+                        onPressed: () {
+                          String dosage;
+                          if (unit.contains("tablet") || unit.contains("capsule")) {
+                            dosage = "$quantity $unit ($strength mg each)";
+                          } else {
+                            dosage = "$quantity $unit";
+                          }
+                          setState(() {
+                            _dosageCtrl.text = dosage;
+                            _dosageError = false;
+                          });
+                          Navigator.pop(context);
+                        },
+                        child: const Text("Done", style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
                       ),
-                      onPressed: () {
-                        String dosage;
-                        if (unit.contains("tablet") || unit.contains("capsule")) {
-                          dosage = "$quantity $unit ($strength mg each)";
-                        } else {
-                          dosage = "$quantity $unit";
-                        }
-                        setState(() {
-                          _dosageCtrl.text = dosage;
-                          _dosageError = false;
-                        });
-                        Navigator.pop(context);
-                      },
-                      child: const Text("Done", style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                      const SizedBox(height: 16),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         );
       },
     );

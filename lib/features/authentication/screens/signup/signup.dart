@@ -104,6 +104,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
           await AppAnalytics.identifyUser(uid: uid, role: role);
           await AppAnalytics.logSignUp(method: 'password');   // in signup
+          Navigator.pushReplacementNamed(context, '/profileSelect');
 
         }
       }
