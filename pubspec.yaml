@@ -61,6 +61,7 @@ dependencies:
   logger: ^2.2.0
   url_launcher: ^6.2.2
   flutter_native_splash: ^2.4.6
+  smooth_page_indicator: ^1.1.0
 
   # Icons
   iconsax: ^0.0.8
@@ -95,6 +96,7 @@ flutter:
     - assets/logos/
     - assets/fonts/
     - assets/images/
+    - assets/images/on_boarding_screen_images/
 
 fonts:
   - family: Roboto

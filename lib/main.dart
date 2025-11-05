@@ -10,7 +10,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_analytics/observer.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:get/get_navigation/src/root/get_material_app.dart';
+import 'package:medi_care/features/authentication/screens/onboarding/onboarding.dart';
 import 'package:medi_care/services/offline_service.dart';
+import 'package:medi_care/utils/theme/theme.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -241,11 +244,13 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // WHY: ReceiverScope exposes active receiver globally (read by Home/Calendar)
-    return MaterialApp(
+    return GetMaterialApp(
         debugShowCheckedModeBanner: false,
         title: "Medi_Care",
-        theme: ThemeData(primarySwatch: Colors.blue),
-        home: const WelcomeScreen(),
+        themeMode: ThemeMode.system,
+        theme: TAppTheme.lightTheme ?? ThemeData(primarySwatch: Colors.blue),
+        darkTheme: TAppTheme.darkTheme ?? ThemeData.dark(),
+        home: const OnBoardingScreen(),
         navigatorObservers: [
           FirebaseAnalyticsObserver(analytics: analytics),
         ],
