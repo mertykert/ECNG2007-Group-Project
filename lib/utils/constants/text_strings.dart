@@ -2,18 +2,18 @@
 class TTexts {
   // -- GLOBAL Texts
 
-  // -- OnBoarding Texts
-  static const String onBoardingTitle1 = "Manage Medications";
-  static const String onBoardingTitle2 = "Track Patient Health";
-  static const String onBoardingTitle3 = "Stay Organized";
+  // -- OnBoarding Texts not needed for our app
+  static const String onBoardingTitle1 = "Choose your product";
+  static const String onBoardingTitle2 = "Select Payment Method";
+  static const String onBoardingTitle3 = "Deliver at your door step";
 
-  static const String onBoardingSubTitle1 = "Easily add and manage medications for your patients with dosage reminders and schedules";
-  static const String onBoardingSubTitle2 = "Monitor patient health records, track vital signs, and maintain comprehensive care logs";
-  static const String onBoardingSubTitle3 = "Get timely alerts for medication doses and appointments to provide seamless care";
+  static const String onBoardingSubTitle1 = "Welcome to a World of Limitless Choices - Your Perfect Product Awaits!";
+  static const String onBoardingSubTitle2 = "For Seamless Transactions, Choose Your Payment Path - Your Convenience, Our Priority!";
+  static const String onBoardingSubTitle3 = "From Our Doorstep to Yours - Swift, Secure, and Contactless Delivery!";
 
-  // -- Home
-  static const String homeAppbarTitle = "Patient Care Dashboard";
-  static const String homeAppbarSubTitle = "Track medications & health";
+  // -- Home -- need to be changed
+  static const String homeAppbarTitle = "Good day for shopping";
+  static const String homeAppbarSubTitle = "Taimoor Sikander";
 
   // -- Authentication Forms
   static const String firstName = "First Name";
