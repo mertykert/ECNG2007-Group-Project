@@ -19,6 +19,8 @@ dependencies:
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.6.0
 
+  smooth_page_indicator: ^1.1.0
+
   connectivity_plus: ^6.0.3
 
   firebase_analytics: ^11.6.0
@@ -92,6 +94,9 @@ flutter:
 
   assets:
     - assets/animations/
+    - assets/animations/on_boarding/Onboarding_first_page.json
+    - assets/animations/on_boarding/Onboarding_second_page.json
+    - assets/animations/on_boarding/Onboarding_third_page.json
     - assets/logos/
     - assets/fonts/
     - assets/images/

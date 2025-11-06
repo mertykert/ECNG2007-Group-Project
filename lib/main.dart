@@ -11,11 +11,13 @@ import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_analytics/observer.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:medi_care/services/offline_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'analytics/analytics_bootstrap.dart';
+import 'features/authentication/auth_gate.dart';
 import 'services/notification_service.dart';
 import 'firebase_options.dart';
 import 'services/missed_dose_service.dart';
@@ -23,6 +25,7 @@ import 'services/refill_service.dart';
 import 'services/med_reminder_scheduler.dart';
 
 // Screens
+import 'features/authentication/screens/onboarding_screen.dart';
 import 'features/authentication/screens/signup/signup.dart';
 import 'features/authentication/screens/welcome/welcome.dart';
 import 'features/authentication/screens/signin/signin.dart';
@@ -245,7 +248,7 @@ class MyApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: "Medi_Care",
         theme: ThemeData(primarySwatch: Colors.blue),
-        home: const WelcomeScreen(),
+        home: const EntryGate(),
         navigatorObservers: [
           FirebaseAnalyticsObserver(analytics: analytics),
         ],
@@ -260,3 +263,30 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+
+class EntryGate extends StatelessWidget {
+  const EntryGate({super.key});
+
+  Future<bool> _seenOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('onboarding_done') == true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _seenOnboarding(),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final seen = snap.data == true;
+        // First app open -> onboarding; otherwise -> your normal auth/home gate
+        return seen ? const AuthGate() : const OnBoardingScreen();
+      },
+    );
+  }
+}
+
