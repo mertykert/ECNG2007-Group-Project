@@ -59,14 +59,30 @@ class MissedDoseService {
       await _firestore
           .collection('users').doc(uid)
           .collection('missed')
-          .doc(yIso)
-          .set({'meds': missedList});
+          .doc(yIso) // keep canonical with the date that was checked
+          .set({
+        'checkedFor': yIso,
+        'meds': missedList,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
       // Notify only if there are misses
+      // ===== schedule a single "Missed Dose Summary" for tomorrow 8:00 AM =====
       if (missedList.isNotEmpty) {
-        await NotificationService.showNow(
+        final now = DateTime.now();
+        final tomorrow = now.add(const Duration(days: 1));
+        final fireAt = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0);
+
+        // Deterministic id so it replaces if we re-run the job for same date.
+        final nid = NotificationService.stableIdFor(uid, 'missed_$yIso', kind: 'missed');
+
+        await NotificationService.cancel(nid); // clear previous if any
+        await NotificationService.scheduleOnce(
+          fireAt,
           "Missed Dose Summary",
           "You missed ${missedList.length} medication${missedList.length > 1 ? 's' : ''} yesterday.",
+          id: nid,
+          payload: 'missed:$uid:$yIso',
         );
       }
 

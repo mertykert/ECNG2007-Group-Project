@@ -1,7 +1,6 @@
 // ============================================================================
 // lib/features/Medication/medication_form.dart
-// Adds canonical 24h time "time24" alongside the display "time".
-// UI unchanged.
+// Uniform validation UI + themed error banner.
 // ============================================================================
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -41,7 +40,11 @@ class _MedicationFormState extends State<MedicationForm> {
   final _expiryCtrl = TextEditingController();
   final _totalCtrl = TextEditingController();
 
+  bool _nameError = false;     // << NEW
   bool _dosageError = false;
+  bool _timeError = false;
+  bool _expiryError = false;
+  bool _totalError = false;
 
   TimeOfDay? _selectedTime;
   String _repeat = 'Once';
@@ -137,7 +140,6 @@ class _MedicationFormState extends State<MedicationForm> {
       _taken           = data['taken'] == true;
       _repeat          = (data['repeat'] ?? 'Once').toString();
 
-      // Prefer time24 → zero parsing failures
       final time24 = (data['time24'] ?? '').toString().trim();
       final timeStr = (data['time'] ?? '').toString();
 
@@ -204,8 +206,7 @@ class _MedicationFormState extends State<MedicationForm> {
                     data: const CupertinoThemeData(
                       textTheme: CupertinoTextThemeData(
                         dateTimePickerTextStyle: TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87,
-                        ),
+                            fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
                       ),
                     ),
                     child: CupertinoDatePicker(
@@ -231,7 +232,10 @@ class _MedicationFormState extends State<MedicationForm> {
                     elevation: 4,
                   ),
                   onPressed: () {
-                    setState(() => _selectedTime = temp);
+                    setState(() {
+                      _selectedTime = temp;
+                      _timeError = false; // clear error when chosen
+                    });
                     Navigator.pop(context);
                   },
                   child: const Text("Done", style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
@@ -245,7 +249,6 @@ class _MedicationFormState extends State<MedicationForm> {
     );
   }
 
-  // REPLACE your entire _showDosagePicker() with this version
   void _showDosagePicker() {
     int quantity = 1;
     int strength = 5;
@@ -260,11 +263,8 @@ class _MedicationFormState extends State<MedicationForm> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
       builder: (context) {
-        // Freeze text scale for the *entire* dosage sheet
         final mq = MediaQuery.of(context);
-        final media = mq.copyWith(
-          textScaler: const TextScaler.linear(1.0), // Flutter ≥3.16
-        );
+        final media = mq.copyWith(textScaler: const TextScaler.linear(1.0));
 
         return MediaQuery(
           data: media,
@@ -284,11 +284,9 @@ class _MedicationFormState extends State<MedicationForm> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        "Select Dosage",
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87),
-                        maxLines: 1, softWrap: false, overflow: TextOverflow.fade, // defensive
-                      ),
+                      const Text("Select Dosage",
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87),
+                          maxLines: 1, softWrap: false, overflow: TextOverflow.fade),
                       const SizedBox(height: 8),
                       Expanded(
                         child: Row(
@@ -300,21 +298,11 @@ class _MedicationFormState extends State<MedicationForm> {
                                 scrollController: FixedExtentScrollController(initialItem: 0),
                                 selectionOverlay: _greyOverlay(),
                                 onSelectedItemChanged: (i) => setModalState(() => quantity = i + 1),
-                                children: List.generate(
-                                  10,
-                                      (i) => const Center(
-                                    child: Text(
-                                      // text scale frozen by MediaQuery above
-                                      "", // placeholder, replaced below
-                                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
-                                    ),
-                                  ),
-                                ).asMap().entries.map((e) => Center(
-                                  child: Text("${e.key + 1}",
-                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
-                                    maxLines: 1, softWrap: false, overflow: TextOverflow.fade,
-                                  ),
-                                )).toList(),
+                                children: List.generate(10, (i) => Center(
+                                  child: Text("${i + 1}",
+                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
+                                      maxLines: 1, softWrap: false, overflow: TextOverflow.fade),
+                                )),
                               ),
                             ),
                             Expanded(
@@ -323,11 +311,9 @@ class _MedicationFormState extends State<MedicationForm> {
                                 selectionOverlay: _greyOverlay(),
                                 onSelectedItemChanged: (i) => setModalState(() => unit = units[i]),
                                 children: units.map((u) => Center(
-                                  child: Text(
-                                    u,
-                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
-                                    maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
-                                  ),
+                                  child: Text(u,
+                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
+                                      maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
                                 )).toList(),
                               ),
                             ),
@@ -338,11 +324,9 @@ class _MedicationFormState extends State<MedicationForm> {
                                   selectionOverlay: _greyOverlay(),
                                   onSelectedItemChanged: (i) => setModalState(() => strength = strengths[i]),
                                   children: strengths.map((mg) => Center(
-                                    child: Text(
-                                      "$mg mg each",
-                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
-                                      maxLines: 1, softWrap: false, overflow: TextOverflow.fade,
-                                    ),
+                                    child: Text("$mg mg each",
+                                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.black87),
+                                        maxLines: 1, softWrap: false, overflow: TextOverflow.fade),
                                   )).toList(),
                                 ),
                               ),
@@ -359,15 +343,12 @@ class _MedicationFormState extends State<MedicationForm> {
                           elevation: 4,
                         ),
                         onPressed: () {
-                          String dosage;
-                          if (unit.contains("tablet") || unit.contains("capsule")) {
-                            dosage = "$quantity $unit ($strength mg each)";
-                          } else {
-                            dosage = "$quantity $unit";
-                          }
+                          final dosage = (unit.contains("tablet") || unit.contains("capsule"))
+                              ? "$quantity $unit ($strength mg each)"
+                              : "$quantity $unit";
                           setState(() {
                             _dosageCtrl.text = dosage;
-                            _dosageError = false;
+                            _dosageError = false; // clear error
                           });
                           Navigator.pop(context);
                         },
@@ -487,27 +468,86 @@ class _MedicationFormState extends State<MedicationForm> {
       ids['reminder'] = await NotificationService.scheduleWeekly(firstTrigger, title, body);
     }
 
-    // Expiry notifications intentionally omitted per your requirement.
     return ids;
   }
 
-  // Replace your _saveMedication() with this version (only diffs are the refill bits).
-  Future<void> _saveMedication() async {
-    final isValid = _formKey.currentState?.validate() ?? false;
-    if (!isValid) return;
+  // -------------------------------
+  // Themed banners  (blue/white)
+  // -------------------------------
+  void _showError(String msg) {
+    // why: unify look with app's primary color
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: const [
+            Icon(Icons.info_rounded, color: Colors.white),
+            SizedBox(width: 10),
+            Expanded(child: Text("Please complete all required fields.", style: TextStyle(color: Colors.white))),
+          ],
+        ),
+        backgroundColor: const Color(0xFF2d59f0),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+        elevation: 3,
+      ),
+    );
+  }
 
-    if (_dosageCtrl.text.isEmpty) {
-      setState(() => _dosageError = true);
-      return;
+  void _showOk(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: const [
+            Icon(Icons.check_circle_rounded, color: Colors.white),
+            SizedBox(width: 10),
+            Expanded(child: Text("Medication saved successfully!",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16))),
+          ],
+        ),
+        backgroundColor: const Color(0xFF2d59f0),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+        elevation: 3,
+      ),
+    );
+  }
+
+  // ==================================
+  // VALIDATION (uniform + themed msg)
+  // ==================================
+  bool _validateAndMark() {
+    final nameOk = _nameCtrl.text.trim().isNotEmpty;
+    final dosageOk = _dosageCtrl.text.trim().isNotEmpty;
+    final timeOk = _selectedTime != null;
+    final expiryOk = _expiryCtrl.text.trim().isNotEmpty;
+    final total = int.tryParse(_totalCtrl.text.trim());
+    final totalOk = total != null && total > 0;
+
+    setState(() {
+      _nameError = !nameOk;
+      _dosageError = !dosageOk;
+      _timeError = !timeOk;
+      _expiryError = !expiryOk;
+      _totalError = !totalOk;
+    });
+
+    if (!(nameOk && dosageOk && timeOk && expiryOk && totalOk)) {
+      _showError("Please complete all required fields.");
+      return false;
     }
-    if (_selectedTime == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select a time')));
-      return;
-    }
+    return true;
+  }
+
+  // SAVE (unchanged logic; just gated by validation)
+  Future<void> _saveMedication() async {
+    if (!_validateAndMark()) return;
 
     setState(() => _loading = true);
     if (_selectedTime == null) {
-      // last resort: now+60s so downstream refill can repeat daily from a valid anchor
       final now = TimeOfDay.now();
       _selectedTime = now;
     }
@@ -525,12 +565,11 @@ class _MedicationFormState extends State<MedicationForm> {
       final perDose  = _extractPillCountFromDosage(_dosageCtrl.text);
 
       if (widget.mode == MedicationFormMode.add) {
-        // ---------- ADD ----------
         final base = <String, dynamic>{
           'name': _nameCtrl.text.trim(),
           'dosage': _dosageCtrl.text.trim(),
           'time': timeStr,
-          'time24': time24,     // canonical
+          'time24': time24,
           'repeat': _repeat,
           'taken': _taken,
           'date': dateStr,
@@ -540,16 +579,13 @@ class _MedicationFormState extends State<MedicationForm> {
           'expiryDate': _expiryCtrl.text.trim(),
           'totalPills': total,
           'perDose': perDose,
-          'remainingPills': total,    // start full
+          'remainingPills': total,
           'lowStockNotified': false,
         };
 
-        //  compute & merge refill fields (needsRefill, threshold, etc.)
         final payload = {...base, ...RefillService.computeRefillPatch(base)};
-
         final medRef = await userRef.collection('medications').add(payload);
 
-        // Single source of truth for alarms
         await MedReminderScheduler.scheduleForMed(
           uid: ownerId,
           medId: medRef.id,
@@ -578,27 +614,22 @@ class _MedicationFormState extends State<MedicationForm> {
         _expiryCtrl.clear();
         _totalCtrl.clear();
       } else {
-        // ---------- EDIT ----------
         if (widget.medId == null) return;
         final docRef = userRef.collection('medications').doc(widget.medId!);
         final snap = await docRef.get();
         if (!snap.exists) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Medication not found')));
+          _showError('Medication not found');
           return;
         }
         final old = snap.data()!;
 
-        // Cancel previous timers before re-schedule
         await MedReminderScheduler.cancelTimersForMed(ownerId, widget.medId!);
-
 
         final oldTotal = (old['totalPills'] ?? 0) as int;
         final oldRemaining = (old['remainingPills'] ?? oldTotal) as int;
         final newTotal = int.tryParse(_totalCtrl.text.trim()) ?? oldTotal;
 
-        // If total increased, treat as a refill: reset remaining to newTotal.
-        // Else clamp remaining within [0, newTotal].
         int newRemaining;
         if (newTotal > oldTotal) {
           newRemaining = newTotal;
@@ -619,22 +650,18 @@ class _MedicationFormState extends State<MedicationForm> {
           'totalPills': newTotal,
           'perDose': perDose,
           'remainingPills': newRemaining,
-          // do not blindly carry old lowStockNotified; compute again below
           'updatedAt': FieldValue.serverTimestamp(),
         };
 
-        // recompute refill fields from new totals/remaining
         final bool totalChanged = newTotal != oldTotal;
         final refillPatch = RefillService.computeRefillPatch({
-           'totalPills': newTotal,
-           'remainingPills': newRemaining,
-           // Force recompute when total changed; otherwise keep explicit value.
-           'refillThreshold': totalChanged ? 0 : ((old['refillThreshold'] ?? 0) as num).toInt(),
-         });
+          'totalPills': newTotal,
+          'remainingPills': newRemaining,
+          'refillThreshold': totalChanged ? 0 : ((old['refillThreshold'] ?? 0) as num).toInt(),
+        });
 
         await docRef.set({...baseUpdate, ...refillPatch}, SetOptions(merge: true));
 
-        // Re-schedule with new time/repeat
         await MedReminderScheduler.scheduleForMed(
           uid: ownerId,
           medId: widget.medId!,
@@ -656,36 +683,11 @@ class _MedicationFormState extends State<MedicationForm> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save error: $e')));
+        _showError('Save error: $e');
       }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  void _showOk(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: const [
-            Icon(Icons.check_circle_rounded, color: Colors.white),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                "Medication saved successfully!",
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: const Color(0xFF2d59f0),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 2),
-        elevation: 3,
-      ),
-    );
   }
 
   @override
@@ -744,31 +746,45 @@ class _MedicationFormState extends State<MedicationForm> {
                     ),
                     const SizedBox(height: 30),
 
+                    // NAME (uniform error look)
                     _inputCard(
                       child: Row(
                         children: [
-                          const Icon(Icons.medication_outlined, color: Colors.black54),
+                          Icon(Icons.medication_outlined,
+                              color: _nameError ? Colors.redAccent : Colors.black54),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: TextFormField(
+                            child: TextField(
                               controller: _nameCtrl,
+                              onChanged: (_) {
+                                if (_nameError && _nameCtrl.text.trim().isNotEmpty) {
+                                  setState(() => _nameError = false);
+                                }
+                              },
                               style: const TextStyle(fontSize: 16, color: Colors.black87),
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 hintText: "Medication Name",
-                                hintStyle: TextStyle(color: Colors.grey),
+                                hintStyle: TextStyle(
+                                  color: _nameError ? Colors.redAccent : Colors.grey,
+                                ),
                                 border: InputBorder.none,
                                 isCollapsed: true,
                                 contentPadding: EdgeInsets.zero,
                               ),
-                              validator: (v) => v == null || v.trim().isEmpty ? "Enter a medication name" : null,
                             ),
                           ),
                         ],
                       ),
                     ),
+                    if (_nameError)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 14, top: 4),
+                        child: Text("Required field", style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                      ),
 
                     const SizedBox(height: 20),
 
+                    // DOSAGE
                     GestureDetector(
                       onTap: _showDosagePicker,
                       child: _inputCard(
@@ -801,19 +817,23 @@ class _MedicationFormState extends State<MedicationForm> {
 
                     const SizedBox(height: 20),
 
+                    // TIME
                     GestureDetector(
                       onTap: _pickTime,
                       child: _inputCard(
                         child: Row(
                           children: [
-                            const Icon(Icons.access_time_outlined, color: Colors.black54),
+                            Icon(Icons.access_time_outlined,
+                                color: _timeError ? Colors.redAccent : Colors.black54),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
                                 _selectedTime == null ? "Select Time" : _selectedTime!.format(context),
                                 style: TextStyle(
                                   fontSize: 16,
-                                  color: _selectedTime == null ? Colors.grey : Colors.black87,
+                                  color: _selectedTime == null
+                                      ? (_timeError ? Colors.redAccent : Colors.grey)
+                                      : Colors.black87,
                                 ),
                               ),
                             ),
@@ -822,9 +842,15 @@ class _MedicationFormState extends State<MedicationForm> {
                         ),
                       ),
                     ),
+                    if (_timeError)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 14, top: 4),
+                        child: Text("Required field", style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                      ),
 
                     const SizedBox(height: 20),
 
+                    // REPEAT
                     GestureDetector(
                       onTap: _pickRepeat,
                       child: _inputCard(
@@ -848,6 +874,7 @@ class _MedicationFormState extends State<MedicationForm> {
 
                     const SizedBox(height: 20),
 
+                    // EXPIRY
                     GestureDetector(
                       onTap: () async {
                         final today = DateTime.now();
@@ -873,20 +900,24 @@ class _MedicationFormState extends State<MedicationForm> {
                         if (picked != null) {
                           setState(() {
                             _expiryCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                            _expiryError = false;
                           });
                         }
                       },
                       child: _inputCard(
                         child: Row(
                           children: [
-                            const Icon(Icons.calendar_today_outlined, color: Colors.black54),
+                            Icon(Icons.calendar_today_outlined,
+                                color: _expiryError ? Colors.redAccent : Colors.black54),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
                                 _expiryCtrl.text.isEmpty ? "Select Expiry Date" : _expiryCtrl.text,
                                 style: TextStyle(
                                   fontSize: 16,
-                                  color: _expiryCtrl.text.isEmpty ? Colors.grey : Colors.black87,
+                                  color: _expiryCtrl.text.isEmpty
+                                      ? (_expiryError ? Colors.redAccent : Colors.grey)
+                                      : Colors.black87,
                                 ),
                               ),
                             ),
@@ -895,9 +926,15 @@ class _MedicationFormState extends State<MedicationForm> {
                         ),
                       ),
                     ),
+                    if (_expiryError)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 14, top: 4),
+                        child: Text("Required field", style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                      ),
 
                     const SizedBox(height: 20),
 
+                    // TOTAL PILLS
                     GestureDetector(
                       onTap: () async {
                         final selected = await showModalBottomSheet<int>(
@@ -917,14 +954,14 @@ class _MedicationFormState extends State<MedicationForm> {
                                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                                   Expanded(
                                     child: CupertinoPicker(
-                                      scrollController: FixedExtentScrollController(initialItem: (current - 1).clamp(0, 99)),
+                                      scrollController: FixedExtentScrollController(
+                                        initialItem: (current - 1).clamp(0, 99),
+                                      ),
                                       itemExtent: 40,
                                       onSelectedItemChanged: (i) => current = i + 1,
                                       children: List.generate(
                                         100,
-                                            (i) => Center(
-                                          child: Text("${i + 1} pills", style: const TextStyle(fontSize: 18)),
-                                        ),
+                                            (i) => Center(child: Text("${i + 1} pills", style: const TextStyle(fontSize: 18))),
                                       ),
                                     ),
                                   ),
@@ -938,19 +975,27 @@ class _MedicationFormState extends State<MedicationForm> {
                             );
                           },
                         );
-                        if (selected != null) setState(() => _totalCtrl.text = selected.toString());
+                        if (selected != null) {
+                          setState(() {
+                            _totalCtrl.text = selected.toString();
+                            _totalError = false;
+                          });
+                        }
                       },
                       child: _inputCard(
                         child: Row(
                           children: [
-                            const Icon(Icons.format_list_numbered_rounded, color: Colors.black54),
+                            Icon(Icons.format_list_numbered_rounded,
+                                color: _totalError ? Colors.redAccent : Colors.black54),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
                                 _totalCtrl.text.isEmpty ? "Total Pills" : "${_totalCtrl.text} pills",
                                 style: TextStyle(
                                   fontSize: 16,
-                                  color: _totalCtrl.text.isEmpty ? Colors.grey : Colors.black87,
+                                  color: _totalCtrl.text.isEmpty
+                                      ? (_totalError ? Colors.redAccent : Colors.grey)
+                                      : Colors.black87,
                                 ),
                               ),
                             ),
@@ -959,6 +1004,11 @@ class _MedicationFormState extends State<MedicationForm> {
                         ),
                       ),
                     ),
+                    if (_totalError)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 14, top: 4),
+                        child: Text("Required field", style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                      ),
 
                     const SizedBox(height: 20),
 

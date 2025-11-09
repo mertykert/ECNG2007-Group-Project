@@ -35,7 +35,7 @@ class _MissedChip extends StatelessWidget {
       builder: (context, snap) {
         final count = snap.data ?? 0;
         final label = period == _MissedPeriod.today
-            ? 'Today'
+            ? 'Yesterday'
             : period == _MissedPeriod.week
             ? 'Week'
             : 'Month';
@@ -49,26 +49,39 @@ class _MissedChip extends StatelessWidget {
               color: Colors.blue.shade50,
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('$label:',
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '$label:',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis, // defensive
                     style: const TextStyle(
-                        color: Color(0xFF2d59f0),
-                        fontWeight: FontWeight.w700)),
-                const SizedBox(width: 6),
-                Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2d59f0),
-                    borderRadius: BorderRadius.circular(12),
+                      color: Color(0xFF2d59f0),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                  child: Text('$count',
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Color(0xFF2d59f0),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '$count',
                       style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700)),
-                ),
-              ],
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -80,7 +93,7 @@ class _MissedChip extends StatelessWidget {
 DateTimeRange _rangeForPeriod(_MissedPeriod p) {
   final now = DateTime.now();
   if (p == _MissedPeriod.today) {
-    final start = DateTime(now.year, now.month, now.day);
+    final start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 1));
     return DateTimeRange(start: start, end: start.add(const Duration(days: 1)));
   } else if (p == _MissedPeriod.week) {
     final start = now.subtract(Duration(days: now.weekday - 1));
@@ -125,7 +138,7 @@ void _showMissedList(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
     builder: (context) {
       final title = period == _MissedPeriod.today
-          ? 'Missed • Today'
+          ? 'Missed • Yesterday'
           : period == _MissedPeriod.week
           ? 'Missed • This Week'
           : 'Missed • This Month';

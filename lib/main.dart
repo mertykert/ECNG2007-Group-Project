@@ -223,6 +223,7 @@ Future<void> main() async {
     // 6) Auth-driven background tasks
     FirebaseAuth.instance.authStateChanges().listen((user) async {
       if (user != null) {
+        await MissedDoseService.checkMissedDosesFor(user.uid);
         await NotificationService.resetFromFirestore(user.uid);
         await _registerBackgroundFor(user.uid);
       } else {
