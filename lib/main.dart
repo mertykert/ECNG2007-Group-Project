@@ -10,6 +10,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_analytics/observer.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:medi_care/services/exact_alarm_prime.dart';
 import 'package:medi_care/services/offline_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
@@ -238,6 +239,10 @@ Future<void> main() async {
   }
 
   runApp(const MyApp());
+  // Prime OS so the app appears under “Alarms & reminders”
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    await ExactAlarmPrime.primeOnce(minutesAhead: 2);
+  });
 }
 
 class MyApp extends StatelessWidget {

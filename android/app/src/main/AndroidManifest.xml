@@ -9,9 +9,6 @@
     <!--  Required for exact alarms -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
-    <!-- Some OEMs (Samsung, Xiaomi) require this one as well -->
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-
     <!--  Optional but recommended -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />

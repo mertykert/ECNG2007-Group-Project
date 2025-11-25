@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:hive/hive.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -21,6 +22,11 @@ class NotificationService {
 
   static final Map<int, Timer> _fallbacks = {};
   static bool _tzReady = false;
+
+  static Future<bool> isExactAlarmAllowed() async {
+    if (!Platform.isAndroid) return true; // iOS/others unaffected
+    return await Permission.scheduleExactAlarm.isGranted;
+  }
 
   /// Ensure timezone initialized
   static Future<void> _ensureTz() async {
@@ -55,37 +61,63 @@ class NotificationService {
 
   Future<void> openBatteryOptimizationSettings() async {
     if (!Platform.isAndroid) return;
+    final pkg = (await PackageInfo.fromPlatform()).packageName;
     final intent = AndroidIntent(
       action: 'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
-      data: 'package:com.example.medi_care', // ← your actual package
+      data: 'package:$pkg',
       flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
     );
     await intent.launch();
   }
 
   /// Ask Android 13+ to open the Exact Alarm permission page
-  static Future<void> _requestExactAlarmPermission() async {
+  /// Open the OS page to allow exact alarms (Android 13+).
+  static Future<void> requestExactAlarmPermission() async {
     if (!Platform.isAndroid) return;
 
-    // Android 13+ only
-    if (await Permission.scheduleExactAlarm.isGranted) {
-      print('⏰ Exact alarm already granted');
+    final pkg = (await PackageInfo.fromPlatform()).packageName;
+
+    // Small delay helps avoid OEMs blocking settings launch at cold start.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
+    // Primary: per-app Exact Alarms page (MUST use data: 'package:<id>')
+    try {
+      await AndroidIntent(
+        action: 'android.settings.REQUEST_SCHEDULE_EXACT_ALARM',
+        data: 'package:$pkg', // <-- critical: use data URI, NOT the 'package:' field
+        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+      ).launch();
+      print('⚙️ Opened per-app Exact Alarms for $pkg');
       return;
+    } catch (e) {
+      print('❌ Per-app exact-alarms page failed: $e');
     }
 
+    // Fallback 1: OEM "Alarms & reminders" list (not universal, but works on many Samsung builds)
     try {
-      const packageName = 'com.example.medi_care'; // ⚠️ replace with your real ID from AndroidManifest
-      final intent = AndroidIntent(
-        action: 'android.settings.REQUEST_SCHEDULE_EXACT_ALARM',
-        package: packageName,
+      await AndroidIntent(
+        action: 'android.settings.MANAGE_SCHEDULED_TASKS',
         flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
-      );
-      await intent.launch();
-      print('⚙️ Opened system settings for exact alarms.');
+      ).launch();
+      print('⚙️ Opened OEM Alarms & reminders list');
+      return;
     } catch (e) {
-      print('❌ Could not open exact alarm settings: $e');
+      print('❌ OEM alarms list failed: $e');
+    }
+
+    // Fallback 2: App details — user can reach Special access from there
+    try {
+      await AndroidIntent(
+        action: 'android.settings.APPLICATION_DETAILS_SETTINGS',
+        data: 'package:$pkg',
+        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+      ).launch();
+      print('⚙️ Opened App Details for $pkg');
+    } catch (e) {
+      print('❌ App details page failed: $e');
     }
   }
+
 
   /// Initialize notification system
   static Future<void> init() async {
@@ -108,7 +140,7 @@ class NotificationService {
 
     if (Platform.isAndroid) {
       await Permission.notification.request();
-      await _requestExactAlarmPermission(); //  this now runs correctly
+      await requestExactAlarmPermission(); //  this now runs correctly
     }
 
     final android = _plugin.resolvePlatformSpecificImplementation<
@@ -412,7 +444,7 @@ class NotificationService {
 
       String currentTimeZone;
 
-// Handle both old and new FlutterTimezone return types
+      // Handle both old and new FlutterTimezone return types
       if (tzResult is String) {
         currentTimeZone = tzResult;
       } else if (tzResult is Map && tzResult['name'] != null) {
@@ -454,7 +486,9 @@ class NotificationService {
         payload: payload, //  Pass along the custom payload
         uiLocalNotificationDateInterpretation:
         UILocalNotificationDateInterpretation.absoluteTime,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        androidScheduleMode: (await Permission.scheduleExactAlarm.isGranted)
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexactAllowWhileIdle,
         matchDateTimeComponents: match,
       );
 
@@ -483,7 +517,9 @@ class NotificationService {
       body,
       tz.TZDateTime.from(when, tz.local),
       _details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: (await Permission.scheduleExactAlarm.isGranted)
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: null,
       payload: payload,
@@ -507,7 +543,9 @@ class NotificationService {
       body,
       tz.TZDateTime.from(when, tz.local),
       _details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: (await Permission.scheduleExactAlarm.isGranted)
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
       payload: payload,
@@ -531,7 +569,9 @@ class NotificationService {
       body,
       tz.TZDateTime.from(when, tz.local),
       _details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: (await Permission.scheduleExactAlarm.isGranted)
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
       payload: payload,
