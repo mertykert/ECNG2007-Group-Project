@@ -95,7 +95,7 @@ class NotificationService {
 
     // Fallback 1: OEM "Alarms & reminders" list (not universal, but works on many Samsung builds)
     try {
-      await AndroidIntent(
+      await const AndroidIntent(
         action: 'android.settings.MANAGE_SCHEDULED_TASKS',
         flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
       ).launch();

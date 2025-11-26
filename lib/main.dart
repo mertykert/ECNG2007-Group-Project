@@ -240,8 +240,8 @@ Future<void> main() async {
 
   runApp(const MyApp());
   // Prime OS so the app appears under “Alarms & reminders”
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    await ExactAlarmPrime.primeOnce(minutesAhead: 2);
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    ExactAlarmPrime.ensureListedAndNudgeIfNeeded();
   });
 }
 
