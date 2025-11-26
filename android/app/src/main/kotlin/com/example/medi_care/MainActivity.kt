@@ -9,12 +9,15 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "medicare/alarmclock"
+
+    private val PRIME_CHANNEL = "medicare/alarmclock"
+    private val EXACT_CHANNEL = "medicare/exact"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        // Channel 1: prime an AlarmClock alarm (for Samsung listing)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PRIME_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "primeAlarmClock" -> {
@@ -29,14 +32,30 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Channel 2: reliable OS check for exact-alarms capability
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, EXACT_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "canScheduleExactAlarms" -> {
+                        try {
+                            val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                            val ok = am.canScheduleExactAlarms()
+                            result.success(ok)
+                        } catch (e: Exception) {
+                            result.error("ERR", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
     }
 
-    // Schedules a user-visible AlarmClock alarm in a few minutes.
-    // This makes Samsung list the app under “Alarms & reminders”.
+    // Schedules a user-visible AlarmClock alarm a few minutes ahead.
+    // This helps Samsung surface the app under “Alarms & reminders”.
     private fun primeAlarmClock(minutesAhead: Int) {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-        // Foreground intent when the alarm fires (harmless for priming).
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }

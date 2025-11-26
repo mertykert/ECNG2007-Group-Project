@@ -80,19 +80,6 @@ class NotificationService {
     // Small delay helps avoid OEMs blocking settings launch at cold start.
     await Future<void>.delayed(const Duration(milliseconds: 400));
 
-    // Primary: per-app Exact Alarms page (MUST use data: 'package:<id>')
-    try {
-      await AndroidIntent(
-        action: 'android.settings.REQUEST_SCHEDULE_EXACT_ALARM',
-        data: 'package:$pkg', // <-- critical: use data URI, NOT the 'package:' field
-        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
-      ).launch();
-      print('⚙️ Opened per-app Exact Alarms for $pkg');
-      return;
-    } catch (e) {
-      print('❌ Per-app exact-alarms page failed: $e');
-    }
-
     // Fallback 1: OEM "Alarms & reminders" list (not universal, but works on many Samsung builds)
     try {
       await const AndroidIntent(
@@ -140,7 +127,6 @@ class NotificationService {
 
     if (Platform.isAndroid) {
       await Permission.notification.request();
-      await requestExactAlarmPermission(); //  this now runs correctly
     }
 
     final android = _plugin.resolvePlatformSpecificImplementation<

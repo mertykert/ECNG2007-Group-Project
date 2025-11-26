@@ -56,6 +56,11 @@
         <!-- ============= RECEIVERS FOR NOTIFICATIONS ============= -->
 
         <receiver
+            android:name=".AlarmPrimeReceiver"
+            android:exported="false"
+            android:enabled="true" />
+
+        <receiver
             android:exported="false"
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
 

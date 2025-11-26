@@ -134,6 +134,7 @@ Future<void> main() async {
     // (Optional) Disable collection until user consents:
      await analytics.setAnalyticsCollectionEnabled(true);
     await AnalyticsBootstrap.init();
+    await ExactAlarmPrime.bootstrapOnce();
 
     // 2) Firestore offline-first
     FirebaseFirestore.instance.settings = const Settings(
@@ -156,6 +157,8 @@ Future<void> main() async {
     await NotificationService.init();
     await checkPermissions();
     await Workmanager().initialize(callbackDispatcher, isInDebugMode: kDebugMode);
+
+
 
     // Restore scheduled reminders from local backup (guard uid)
     Future<void> _restoreScheduledRemindersForCurrentUser() async {
@@ -239,10 +242,6 @@ Future<void> main() async {
   }
 
   runApp(const MyApp());
-  // Prime OS so the app appears under “Alarms & reminders”
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    ExactAlarmPrime.ensureListedAndNudgeIfNeeded();
-  });
 }
 
 class MyApp extends StatelessWidget {
